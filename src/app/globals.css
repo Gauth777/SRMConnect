@@ -7,6 +7,13 @@
   --color-sunset-amber: #F2A03D;
   --color-sunset-violet: #58436C;
 
+  /* Winter Dawn Palette */
+  --color-wd-concrete: #525871;
+  --color-wd-steel: #857C91;
+  --color-wd-rosewood: #CD9FA0;
+  --color-wd-peaches: #F2C1A3;
+  --color-wd-dawn: #F8CCAA;
+
   --font-playfair: var(--font-playfair), serif;
   --font-inter: var(--font-inter), sans-serif;
 }
