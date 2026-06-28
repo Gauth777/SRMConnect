@@ -1,0 +1,164 @@
+@import "tailwindcss";
+
+@theme {
+  --color-sunset-peach: #FFC4B1;
+  --color-sunset-orange: #F27F3D;
+  --color-sunset-rust: #8C3D35;
+  --color-sunset-amber: #F2A03D;
+  --color-sunset-violet: #58436C;
+
+  /* Winter Dawn Palette */
+  --color-wd-concrete: #525871;
+  --color-wd-steel: #857C91;
+  --color-wd-rosewood: #CD9FA0;
+  --color-wd-peaches: #F2C1A3;
+  --color-wd-dawn: #F8CCAA;
+
+  --font-playfair: var(--font-playfair), serif;
+  --font-inter: var(--font-inter), sans-serif;
+}
+
+/* Custom animations and utilities */
+@layer utilities {
+  .bg-sunset-gradient-1 {
+    background: linear-gradient(135deg, #58436C, #8C3D35, #F27F3D, #F2A03D);
+    background-size: 400% 400%;
+    animation: sunset-cycle-1 18s ease infinite;
+  }
+
+  .bg-sunset-gradient-2 {
+    background: linear-gradient(225deg, #8C3D35, #58436C, #F2A03D, #F27F3D);
+    background-size: 400% 400%;
+    animation: sunset-cycle-2 20s ease infinite;
+  }
+
+  .bg-sunset-gradient-student {
+    background: linear-gradient(135deg, rgba(88, 67, 108, 0.95), rgba(140, 61, 53, 0.95));
+  }
+
+  .bg-sunset-gradient-faculty {
+    background: linear-gradient(135deg, rgba(242, 160, 61, 0.95), rgba(140, 61, 53, 0.95));
+  }
+
+  .bg-sunset-gradient-admin {
+    background: linear-gradient(135deg, rgba(88, 67, 108, 0.95), rgba(242, 127, 61, 0.95));
+  }
+
+  /* Glassmorphism card utility */
+  .glass-card {
+    background: rgba(88, 67, 108, 0.25);
+    backdrop-filter: blur(16px) saturate(120%);
+    -webkit-backdrop-filter: blur(16px) saturate(120%);
+    border: 1px solid rgba(255, 196, 177, 0.15);
+  }
+
+  .glass-input {
+    background: rgba(140, 61, 53, 0.15);
+    backdrop-filter: blur(8px);
+    border: 1px solid rgba(255, 196, 177, 0.2);
+    color: #FFC4B1;
+  }
+
+  .glass-input:focus {
+    outline: none;
+    border-color: #F27F3D;
+    box-shadow: 0 0 15px rgba(242, 127, 61, 0.4);
+  }
+
+  /* Glow effects */
+  .shadow-glow-peach {
+    box-shadow: 0 0 25px rgba(255, 196, 177, 0.45);
+  }
+  
+  .shadow-glow-orange {
+    box-shadow: 0 0 25px rgba(242, 127, 61, 0.55);
+  }
+
+  .shadow-glow-amber {
+    box-shadow: 0 0 25px rgba(242, 160, 61, 0.55);
+  }
+
+  .shadow-glow-rust {
+    box-shadow: 0 0 25px rgba(140, 61, 53, 0.55);
+  }
+
+  .shadow-glow-violet {
+    box-shadow: 0 0 25px rgba(88, 67, 108, 0.55);
+  }
+}
+
+@keyframes sunset-cycle-1 {
+  0% {
+    background-position: 0% 50%;
+  }
+  50% {
+    background-position: 100% 50%;
+  }
+  100% {
+    background-position: 0% 50%;
+  }
+}
+
+@keyframes sunset-cycle-2 {
+  0% {
+    background-position: 50% 100%;
+  }
+  50% {
+    background-position: 50% 0%;
+  }
+  100% {
+    background-position: 50% 100%;
+  }
+}
+
+/* Base custom styles to eliminate default styles */
+html, body {
+  margin: 0;
+  padding: 0;
+  width: 100%;
+  height: 100%;
+  overflow-x: hidden;
+  font-family: var(--font-inter), system-ui, sans-serif;
+  color: #3D2A4A;
+  background: #ffffff;
+}
+
+/* Pulsing Scroll Indicator */
+@keyframes pulse-slow {
+  0%, 100% {
+    opacity: 0.4;
+    transform: translateY(0);
+  }
+  50% {
+    opacity: 1;
+    transform: translateY(8px);
+  }
+}
+
+.pulse-indicator {
+  animation: pulse-slow 2s infinite ease-in-out;
+}
+
+/* Floating Orb animation */
+@keyframes float-slow {
+  0%, 100% {
+    transform: translateY(0) scale(1);
+  }
+  50% {
+    transform: translateY(-20px) scale(1.1);
+  }
+}
+
+.animate-float {
+  animation: float-slow 10s infinite ease-in-out;
+}
+
+.animate-float-delayed {
+  animation: float-slow 14s infinite ease-in-out;
+  animation-delay: 2s;
+}
+
+.animate-float-slowest {
+  animation: float-slow 18s infinite ease-in-out;
+  animation-delay: 4s;
+}
