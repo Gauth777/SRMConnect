@@ -1,0 +1,10 @@
+// This is your Prisma schema file,
+// learn more about it in the docs: https://pris.ly/d/prisma-schema
+
+
+
+// Technical placeholder model to allow Prisma Client compilation and code generation.
+// No migrations should be run for this model; it will be replaced once the database schema is pulled.
+model PrismaPlaceholder {
+  id Int @id @default(autoincrement())
+}
