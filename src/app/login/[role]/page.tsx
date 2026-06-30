@@ -42,7 +42,18 @@ export default function LoginPage({ params }: PageProps) {
   };
 
   const handleLoginSuccess = (formData: Record<string, string>) => {
-    if (role === "faculty") {
+    if (role === "admin") {
+      localStorage.setItem(
+        "campusconnect_user",
+        JSON.stringify({
+          role: "admin",
+          loggedIn: true,
+          name: "Admin",
+          email: formData.adminEmail || "admin@srmist.edu.in",
+        })
+      );
+      router.push("/admin/dashboard");
+    } else if (role === "faculty") {
       handleFacultyLogin(formData);
     } else {
       // Existing student flow (unchanged)
