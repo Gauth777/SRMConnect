@@ -1,10 +1,18 @@
-// This is your Prisma schema file,
-// learn more about it in the docs: https://pris.ly/d/prisma-schema
+// Prisma schema for the SRMConnect backend foundation.
+// Business models are intentionally not defined yet. The approved Supabase
+// PostgreSQL schema will later be introspected with `prisma db pull`.
 
+generator client {
+  provider = "prisma-client-js"
+}
 
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
 
-// Technical placeholder model to allow Prisma Client compilation and code generation.
-// No migrations should be run for this model; it will be replaced once the database schema is pulled.
+// Technical placeholder used only so Prisma Client can be generated during
+// the foundation stage. Do not create or migrate this table in Supabase.
 model PrismaPlaceholder {
   id Int @id @default(autoincrement())
 }
