@@ -1,18 +1,202 @@
-// Prisma schema for the SRMConnect backend foundation.
-// Business models are intentionally not defined yet. The approved Supabase
-// PostgreSQL schema will later be introspected with `prisma db pull`.
-
 generator client {
   provider = "prisma-client-js"
 }
 
 datasource db {
-  provider = "postgresql"
-  url      = env("DATABASE_URL")
+  provider  = "postgresql"
+  url       = env("DATABASE_URL")
+  directUrl = env("DIRECT_URL")
 }
 
-// Technical placeholder used only so Prisma Client can be generated during
-// the foundation stage. Do not create or migrate this table in Supabase.
-model PrismaPlaceholder {
-  id Int @id @default(autoincrement())
+enum UserRole {
+  STUDENT
+  FACULTY
+  ADMIN
+
+  @@map("user_role")
+}
+
+enum UserStatus {
+  ACTIVE
+  INACTIVE
+  BLOCKED
+
+  @@map("user_status")
+}
+
+enum VerificationStatus {
+  PENDING
+  VERIFIED
+  REJECTED
+
+  @@map("verification_status")
+}
+
+enum FacultyAdvisorRole {
+  FA
+  AA
+  BOTH
+  NEITHER
+
+  @@map("faculty_advisor_role")
+}
+
+enum ProjectPostType {
+  PROJECT
+  HACKATHON
+  RESEARCH
+  INHOUSE
+  GUEST_LECTURE
+  WORKSHOP
+
+  @@map("project_post_type")
+}
+
+enum ProjectMode {
+  ONLINE
+  OFFLINE
+  HYBRID
+
+  @@map("project_mode")
+}
+
+enum SkillLevel {
+  BEGINNER
+  INTERMEDIATE
+  ADVANCED
+  ANY_LEVEL
+
+  @@map("skill_level")
+}
+
+enum ProjectStatus {
+  DRAFT
+  OPEN
+  CLOSED
+  ARCHIVED
+
+  @@map("project_status")
+}
+
+enum ApplicationStatus {
+  PENDING
+  ACCEPTED
+  REJECTED
+  WITHDRAWN
+
+  @@map("application_status")
+}
+
+model Profile {
+  id              String     @id @db.Uuid
+  email           String     @unique
+  fullName        String?    @map("full_name")
+  role            UserRole
+  status          UserStatus @default(ACTIVE)
+  phoneNumber     String?    @map("phone_number")
+  bio             String?
+  avatarUrl       String?    @map("avatar_url")
+  profileComplete Boolean    @default(false) @map("profile_complete")
+  createdAt       DateTime   @default(now()) @map("created_at")
+  updatedAt       DateTime   @updatedAt @map("updated_at")
+  student         Student?
+  faculty         Faculty?
+
+  @@map("profiles")
+}
+
+model Student {
+  id             String        @id @db.Uuid
+  registrationNo String        @unique @map("registration_no")
+  dob            DateTime?     @db.Date
+  gender         String?
+  department     String?
+  program        String?
+  specialization String?
+  currentYear    Int?          @map("current_year")
+  cgpa           Float?
+  batch          String?
+  skills         Json          @default("[]")
+  interests      String[]      @default([])
+  projectTypes   String[]      @default([]) @map("project_types")
+  preferredRoles String[]      @default([]) @map("preferred_roles")
+  careerGoal     String?       @map("career_goal")
+  githubUrl      String?       @map("github_url")
+  linkedinUrl    String?       @map("linkedin_url")
+  portfolioUrl   String?       @map("portfolio_url")
+  resumeUrl      String?       @map("resume_url")
+  otherLink      String?       @map("other_link")
+  createdAt      DateTime      @default(now()) @map("created_at")
+  updatedAt      DateTime      @updatedAt @map("updated_at")
+  profile        Profile       @relation(fields: [id], references: [id], onDelete: Cascade)
+  applications   Application[]
+
+  @@map("students")
+}
+
+model Faculty {
+  id                 String              @id @db.Uuid
+  employeeId         String              @unique @map("employee_id")
+  designation        String?
+  advisorRole        FacultyAdvisorRole? @map("advisor_role")
+  experienceYears    Int?                @map("experience_years")
+  campus             String?
+  department         String?
+  domains            String[]            @default([])
+  currentSubjects    String[]            @default([]) @map("current_subjects")
+  previousSubjects   String[]            @default([]) @map("previous_subjects")
+  skills             String[]            @default([])
+  verificationStatus VerificationStatus  @default(PENDING) @map("verification_status")
+  createdAt          DateTime            @default(now()) @map("created_at")
+  updatedAt          DateTime            @updatedAt @map("updated_at")
+  profile            Profile             @relation(fields: [id], references: [id], onDelete: Cascade)
+  projects           Project[]
+
+  @@map("faculty")
+}
+
+model Project {
+  id                     String          @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  facultyId              String          @db.Uuid @map("faculty_id")
+  postType               ProjectPostType @map("post_type")
+  title                  String          @db.VarChar(100)
+  domain                 String
+  description            String          @db.VarChar(500)
+  mode                   ProjectMode
+  skills                 String[]        @default([])
+  skillLevel             SkillLevel      @map("skill_level")
+  slots                  Int
+  duration               String
+  deadline               DateTime        @db.Date
+  additionalRequirements String?         @map("additional_requirements")
+  requiredDocs           String[]        @default(["resume"]) @map("required_docs")
+  status                 ProjectStatus   @default(OPEN)
+  createdAt              DateTime        @default(now()) @map("created_at")
+  updatedAt              DateTime        @updatedAt @map("updated_at")
+  faculty                Faculty         @relation(fields: [facultyId], references: [id], onDelete: Cascade)
+  applications           Application[]
+
+  @@index([facultyId])
+  @@index([status, deadline])
+  @@map("projects")
+}
+
+model Application {
+  id            String            @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  projectId     String            @db.Uuid @map("project_id")
+  studentId     String            @db.Uuid @map("student_id")
+  status        ApplicationStatus @default(PENDING)
+  coverLetter   String?           @map("cover_letter")
+  githubUrl     String?           @map("github_url")
+  portfolioUrl  String?           @map("portfolio_url")
+  documentUrls  Json              @default("{}") @map("document_urls")
+  createdAt     DateTime          @default(now()) @map("created_at")
+  updatedAt     DateTime          @updatedAt @map("updated_at")
+  project       Project           @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  student       Student           @relation(fields: [studentId], references: [id], onDelete: Cascade)
+
+  @@unique([projectId, studentId])
+  @@index([projectId, status])
+  @@index([studentId, status])
+  @@map("applications")
 }
