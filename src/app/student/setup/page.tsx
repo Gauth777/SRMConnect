@@ -3,6 +3,7 @@
 import "./setup.css";
 import React, { useState, useEffect, useRef } from "react";
 import { useRouter } from "next/navigation";
+import { apiRequest } from "@/lib/api";
 import { motion, AnimatePresence } from "framer-motion";
 import {
   Globe,
@@ -100,6 +101,7 @@ interface SetupFormData {
 export default function StudentSetupPage() {
   const router = useRouter();
   const [isLoading, setIsLoading] = useState(true);
+  const [isSaving, setIsSaving] = useState(false);
   const [step, setStep] = useState(1);
   const [direction, setDirection] = useState(1);
   const [skillInput, setSkillInput] = useState("");
@@ -155,13 +157,59 @@ export default function StudentSetupPage() {
     if (step === 4 || step === 5) { setDirection(1); setStep((p) => p + 1); }
   };
 
-  const handleProfileComplete = () => {
-    localStorage.setItem("campusconnect_user", JSON.stringify({
-      role: "student",
-      profileComplete: true,
-      loggedIn: true,
-    }));
-    router.push("/student/feed");
+  const handleProfileComplete = async () => {
+    const existing = JSON.parse(localStorage.getItem("campusconnect_user") || "{}");
+    if (!existing.regNumber) {
+      alert("Your registration number is missing from this session. Please sign in again.");
+      router.push("/login/student");
+      return;
+    }
+
+    const yearMap: Record<string, number> = { "1st": 1, "2nd": 2, "3rd": 3, "4th": 4 };
+    setIsSaving(true);
+    try {
+      await apiRequest("/profiles/me/student", {
+        method: "PUT",
+        body: JSON.stringify({
+          fullName: formData.fullName.trim(),
+          registrationNo: existing.regNumber,
+          phoneNumber: formData.phoneNumber || undefined,
+          dob: formData.dob || undefined,
+          gender: formData.gender || undefined,
+          bio: formData.bio || undefined,
+          department: formData.department || undefined,
+          program: formData.program || undefined,
+          specialization: formData.specialization || undefined,
+          currentYear: yearMap[formData.currentYear],
+          cgpa: formData.cgpa ? Number(formData.cgpa) : undefined,
+          batch: formData.batch || undefined,
+          skills: formData.skills,
+          interests: formData.interests,
+          projectTypes: formData.projectTypes,
+          preferredRoles: formData.preferredRoles,
+          careerGoal: formData.careerGoal || undefined,
+          githubUrl: formData.githubUrl || undefined,
+          linkedinUrl: formData.linkedinUrl || undefined,
+          portfolioUrl: formData.portfolioUrl || undefined,
+          otherLink: formData.otherLink || undefined,
+        }),
+      });
+
+      localStorage.setItem("campusconnect_user", JSON.stringify({
+        ...existing,
+        role: "student",
+        profileComplete: true,
+        loggedIn: true,
+        fullName: formData.fullName.trim(),
+        department: formData.department,
+        currentYear: formData.currentYear,
+      }));
+      router.push("/student/feed");
+    } catch (error) {
+      alert(error instanceof Error ? error.message : "Could not save your profile.");
+    } finally {
+      setIsSaving(false);
+    }
   };
 
   const isStep1Valid = () =>
@@ -1086,9 +1134,10 @@ export default function StudentSetupPage() {
               <button
                 type="button"
                 onClick={handleProfileComplete}
-                className="px-7 py-3.5 rounded-xl font-bold text-base bg-[#4A2870] text-white hover:bg-[#9E4F8A] cursor-pointer shadow-md active:scale-95 flex items-center gap-2"
+                disabled={isSaving}
+                className="px-7 py-3.5 rounded-xl font-bold text-base bg-[#4A2870] text-white hover:bg-[#9E4F8A] cursor-pointer shadow-md active:scale-95 flex items-center gap-2 disabled:cursor-wait disabled:opacity-60"
               >
-                Looks good, Let&apos;s go! <ArrowRight className="w-4 h-4" />
+                {isSaving ? "Saving profile..." : "Looks good, Let's go!"} <ArrowRight className="w-4 h-4" />
               </button>
             )}
           </div>

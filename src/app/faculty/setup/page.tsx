@@ -2,6 +2,7 @@
 
 import { useState, useEffect } from "react";
 import { useRouter } from "next/navigation";
+import { apiRequest } from "@/lib/api";
 import { motion, AnimatePresence } from "framer-motion";
 import { X, ArrowRight, ArrowLeft } from "lucide-react";
 
@@ -242,6 +243,7 @@ export default function FacultySetupPage() {
   const router = useRouter();
   const [mounted, setMounted] = useState(false);
   const [isLoading, setIsLoading] = useState(true);
+  const [isSaving, setIsSaving] = useState(false);
   const [step, setStep] = useState(1);
   const [direction, setDirection] = useState(1);
 
@@ -312,23 +314,54 @@ export default function FacultySetupPage() {
   const goNext = () => { setDirection(1); setStep((s) => s + 1); };
   const goBack = () => { setDirection(-1); setStep((s) => s - 1); };
 
-  const handleSave = () => {
+  const handleSave = async () => {
     const existing = JSON.parse(localStorage.getItem("campusconnect_user") || "{}");
-    localStorage.setItem("campusconnect_user", JSON.stringify({
-      ...existing,
-      profileComplete: true,
-      designation: formData.designation,
-      campus: formData.campus,
-      department: formData.department,
-      faOrAa: formData.faOrAa,
-      experience: formData.experience,
-      domains: formData.domains,
-      currentSubjects: formData.currentSubjects,
-      previousSubjects: formData.previousSubjects,
-      skills: formData.skills,
-      name: formData.fullName,
-    }));
-    router.push("/faculty/dashboard");
+    if (!existing.empId) {
+      alert("Your employee ID is missing from this session. Please sign in again.");
+      router.push("/login/faculty");
+      return;
+    }
+
+    setIsSaving(true);
+    try {
+      await apiRequest("/profiles/me/faculty", {
+        method: "PUT",
+        body: JSON.stringify({
+          fullName: formData.fullName.trim(),
+          employeeId: existing.empId,
+          designation: formData.designation || undefined,
+          advisorRole: formData.faOrAa || undefined,
+          experienceYears: formData.experience ? Number(formData.experience) : undefined,
+          campus: formData.campus || undefined,
+          department: formData.department || undefined,
+          domains: formData.domains,
+          currentSubjects: formData.currentSubjects,
+          previousSubjects: formData.previousSubjects,
+          skills: formData.skills,
+        }),
+      });
+
+      localStorage.setItem("campusconnect_user", JSON.stringify({
+        ...existing,
+        profileComplete: true,
+        designation: formData.designation,
+        campus: formData.campus,
+        department: formData.department,
+        faOrAa: formData.faOrAa,
+        experience: formData.experience,
+        domains: formData.domains,
+        currentSubjects: formData.currentSubjects,
+        previousSubjects: formData.previousSubjects,
+        skills: formData.skills,
+        name: formData.fullName.trim(),
+        fullName: formData.fullName.trim(),
+      }));
+      router.push("/faculty/dashboard");
+    } catch (error) {
+      alert(error instanceof Error ? error.message : "Could not save your faculty profile.");
+    } finally {
+      setIsSaving(false);
+    }
   };
 
   const completionPct = () => {
@@ -757,7 +790,7 @@ export default function FacultySetupPage() {
           )}
 
           {step === 3 && (
-            <button type="button" onClick={handleSave}
+            <button type="button" onClick={handleSave} disabled={isSaving}
               style={{
                 padding: "12px 28px", borderRadius: "12px", border: "none",
                 background: "#6B4B7A", color: "white",

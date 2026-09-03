@@ -2,10 +2,10 @@
 
 import React, { useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
+import { apiRequest } from "@/lib/api";
 import { AnimatePresence, motion } from "framer-motion";
 import { ArrowRight, Eye, X } from "lucide-react";
 import {
-  POSTS_STORAGE_KEY,
   POST_TYPE_OPTIONS,
   PROJECT_DOMAIN_OPTIONS,
   PROJECT_MODE_OPTIONS,
@@ -14,8 +14,6 @@ import {
   getInitials,
   readFacultyUser,
   safeParseJson,
-  writeFacultyPosts,
-  type FacultyPostRecord,
 } from "@/components/faculty/faculty-data";
 
 type PostType = (typeof POST_TYPE_OPTIONS)[number]["value"];
@@ -229,57 +227,43 @@ export default function FacultyCreatePostPage() {
     setTimeout(() => setToast(null), 3000);
   };
 
-  const publishPost = () => {
+  const publishPost = async () => {
     if (!compulsoryValid) {
       setToast({ message: "Please complete all required fields.", type: "error" });
       setTimeout(() => setToast(null), 3000);
       return;
     }
 
-    const existingPosts = safeParseJson<FacultyPostRecord[]>(
-      localStorage.getItem(POSTS_STORAGE_KEY),
-      []
-    );
-    const userData = readFacultyUser();
+    try {
+      await apiRequest("/projects", {
+        method: "POST",
+        body: JSON.stringify({
+          postType: formData.postType,
+          title: formData.title.trim(),
+          domain: formData.domain,
+          description: formData.description.trim(),
+          mode: formData.mode,
+          skills: formData.skills,
+          skillLevel: formData.skillLevel,
+          slots: Number(formData.slots),
+          duration: formData.duration,
+          deadline: formData.deadline,
+          additionalRequirements: formData.additionalRequirements || undefined,
+          requiredDocs: formData.requiredDocs,
+          status: "open",
+        }),
+      });
 
-    const typeMap: Record<PostType, FacultyPostRecord["type"]> = {
-      project: "project",
-      hackathon: "hackathon",
-      research: "research",
-      inhouse: "project",
-      "guest-lecture": "research",
-      workshop: "project",
-    };
-
-    const nextPost: FacultyPostRecord = {
-      id: Date.now(),
-      type: typeMap[formData.postType as PostType],
-      postType: formData.postType || "project",
-      faculty: userData?.name || "Faculty",
-      dept: userData?.department || "CSE",
-      campus: userData?.campus || "KTR",
-      time: "Just now",
-      title: formData.title,
-      description: formData.description,
-      skills: formData.skills,
-      domain: formData.domain,
-      duration: formData.duration,
-      slots: Number(formData.slots),
-      remaining: Number(formData.slots),
-      deadline: formData.deadline,
-      mode: formData.mode,
-      skillLevel: formData.skillLevel,
-      compatibility: Math.floor(Math.random() * 30) + 65,
-      status: "open",
-      createdAt: new Date().toISOString(),
-      requiredDocs: formData.requiredDocs,
-      additionalRequirements: formData.additionalRequirements,
-    };
-
-    writeFacultyPosts([nextPost, ...existingPosts]);
-    localStorage.removeItem("campusconnect_post_draft");
-    setToast({ message: "Post published! Students can now see it.", type: "success" });
-    window.setTimeout(() => router.push("/faculty/dashboard"), 1500);
+      localStorage.removeItem("campusconnect_post_draft");
+      setToast({ message: "Post published to SRM Connect!", type: "success" });
+      window.setTimeout(() => router.push("/faculty/dashboard"), 1200);
+    } catch (error) {
+      setToast({
+        message: error instanceof Error ? error.message : "Could not publish the post.",
+        type: "error",
+      });
+      setTimeout(() => setToast(null), 4000);
+    }
   };
 
   return (
