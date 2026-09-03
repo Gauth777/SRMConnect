@@ -22,10 +22,13 @@ import {
   Users
 } from "lucide-react";
 import { readFacultyPosts, safeParseJson } from "@/components/faculty/faculty-data";
+import { apiRequest } from "@/lib/api";
+import { getSupabaseBrowserClient } from "@/lib/supabase/client";
 
 // Types
 interface Post {
   id: number;
+  backendId?: string;
   type: "project" | "hackathon" | "achievement" | "research";
   faculty?: string;
   dept?: string;
@@ -56,7 +59,33 @@ interface CampusConnectUser {
   currentYear?: string;
 }
 
-// Mock Data
+interface RemoteProject {
+  id: string;
+  postType: string;
+  title: string;
+  domain: string;
+  description: string;
+  mode: string;
+  skills: string[];
+  skillLevel: string;
+  slots: number;
+  duration: string;
+  deadline: string;
+  createdAt: string;
+  faculty: {
+    department?: string | null;
+    designation?: string | null;
+    profile: { fullName?: string | null };
+  };
+  _count: { applications: number };
+}
+
+interface RemoteApplication {
+  projectId: string;
+}
+
+// Mock Data is kept only as an empty-database preview. Once real projects exist,
+// the feed switches completely to API-backed records.
 const MOCK_POSTS: Post[] = [
   {
     id: 1,
@@ -172,6 +201,7 @@ export default function FeedClient() {
 
   // States
   const facultyPosts = useSyncExternalStore(subscribeToStorage, readFacultyPostsSnapshot, () => []);
+  const [remotePosts, setRemotePosts] = useState<Post[]>([]);
   const [activeTab, setActiveTab] = useState<string>("All");
   const [savedPostIds, setSavedPostIds] = useState<number[]>([]);
   const [appliedPostIds, setAppliedPostIds] = useState<number[]>([]);
@@ -210,6 +240,30 @@ export default function FeedClient() {
     }
   }, [router, userProfile]);
 
+  useEffect(() => {
+    if (!userProfile?.loggedIn || userProfile.profileComplete === false) return;
+
+    let cancelled = false;
+    const loadFeed = async () => {
+      try {
+        const [projects, applications] = await Promise.all([
+          apiRequest<RemoteProject[]>("/projects"),
+          apiRequest<RemoteApplication[]>("/applications/me"),
+        ]);
+        if (cancelled) return;
+        setRemotePosts(projects.map(mapRemoteProject));
+        setAppliedPostIds(applications.map((application) => uiIdFromUuid(application.projectId)));
+      } catch (error) {
+        if (!cancelled) {
+          triggerToast(error instanceof Error ? error.message : "Could not load the live project feed.");
+        }
+      }
+    };
+
+    void loadFeed();
+    return () => { cancelled = true; };
+  }, [userProfile]);
+
   // Click outside listener for dropdowns
   useEffect(() => {
     function handleClickOutside(event: MouseEvent) {
@@ -237,7 +291,8 @@ export default function FeedClient() {
     }, 3000);
   };
 
-  const handleLogout = () => {
+  const handleLogout = async () => {
+    await getSupabaseBrowserClient().auth.signOut({ scope: "local" });
     localStorage.removeItem("campusconnect_user");
     router.push("/");
   };
@@ -257,20 +312,29 @@ export default function FeedClient() {
   };
 
   // Toggle Apply/Join
-  const toggleApply = (id: number, type: string) => {
-    if (appliedPostIds.includes(id)) return;
-    setAppliedPostIds((prev) => [...prev, id]);
+  const toggleApply = async (post: Post, type: string) => {
+    if (appliedPostIds.includes(post.id)) return;
 
-    setRemainingByPostId((current) => {
-      const nextRemaining = current[id] ?? getBaseRemaining(id);
-      if (nextRemaining <= 0) {
-        return current;
+    try {
+      if (post.backendId) {
+        await apiRequest(`/applications/projects/${post.backendId}`, {
+          method: "POST",
+          body: JSON.stringify({}),
+        });
       }
-      return { ...current, [id]: nextRemaining - 1 };
-    });
 
-    const actionText = type === "hackathon" ? "Joined team successfully!" : "Application submitted successfully!";
-    triggerToast(actionText);
+      setAppliedPostIds((prev) => [...prev, post.id]);
+      setRemainingByPostId((current) => {
+        const nextRemaining = current[post.id] ?? post.remaining ?? getBaseRemaining(post.id);
+        if (nextRemaining <= 0) return current;
+        return { ...current, [post.id]: nextRemaining - 1 };
+      });
+
+      const actionText = type === "hackathon" ? "Joined team successfully!" : "Application submitted successfully!";
+      triggerToast(actionText);
+    } catch (error) {
+      triggerToast(error instanceof Error ? error.message : "Could not submit your application.");
+    }
   };
 
   // Toggle Reaction on Achievement
@@ -292,7 +356,7 @@ export default function FeedClient() {
   };
 
   const posts = useMemo(() => {
-    const facultyFeedPosts = [...facultyPosts, ...MOCK_POSTS];
+    const facultyFeedPosts = remotePosts.length > 0 ? remotePosts : [...facultyPosts, ...MOCK_POSTS];
     return facultyFeedPosts.map((post) => {
       const remaining = remainingByPostId[post.id];
       const reactions = reactionByPostId[post.id];
@@ -302,7 +366,7 @@ export default function FeedClient() {
         reactions: reactions !== undefined ? reactions : post.reactions,
       };
     });
-  }, [facultyPosts, remainingByPostId, reactionByPostId]);
+  }, [facultyPosts, remotePosts, remainingByPostId, reactionByPostId]);
 
   // Filter logic
   const filteredPosts = posts.filter((post) => {
@@ -781,7 +845,7 @@ export default function FeedClient() {
 
                                 <motion.button
                                   whileTap={{ scale: 0.96 }}
-                                  onClick={() => toggleApply(post.id, "project")}
+                                  onClick={() => toggleApply(post, "project")}
                                   disabled={isApplied}
                                   className={`px-4 py-1.5 rounded-lg text-xs font-bold transition-all flex items-center gap-1 cursor-pointer ${
                                     isApplied
@@ -875,7 +939,7 @@ export default function FeedClient() {
 
                                 <motion.button
                                   whileTap={{ scale: 0.96 }}
-                                  onClick={() => toggleApply(post.id, "hackathon")}
+                                  onClick={() => toggleApply(post, "hackathon")}
                                   disabled={isApplied}
                                   className={`px-4 py-1.5 rounded-lg text-xs font-bold transition-all flex items-center gap-1 cursor-pointer ${
                                     isApplied
@@ -1029,7 +1093,7 @@ export default function FeedClient() {
 
                                 <motion.button
                                   whileTap={{ scale: 0.96 }}
-                                  onClick={() => toggleApply(post.id, "research")}
+                                  onClick={() => toggleApply(post, "research")}
                                   disabled={isApplied}
                                   className={`px-4 py-1.5 rounded-lg text-xs font-bold transition-all flex items-center gap-1 cursor-pointer ${
                                     isApplied
@@ -1399,4 +1463,45 @@ function getBaseRemaining(id: number) {
 function getBaseReactions(id: number) {
   const post = MOCK_POSTS.find((item) => item.id === id);
   return post?.reactions ?? 0;
+}
+
+
+function uiIdFromUuid(value: string) {
+  let hash = 0;
+  for (let index = 0; index < value.length; index += 1) {
+    hash = ((hash << 5) - hash + value.charCodeAt(index)) | 0;
+  }
+  return -Math.abs(hash || 1);
+}
+
+function mapRemoteProject(project: RemoteProject): Post {
+  const uiId = uiIdFromUuid(project.id);
+  const applicationCount = project._count?.applications ?? 0;
+  const postType = project.postType.toUpperCase();
+  const type: Post["type"] =
+    postType === "HACKATHON"
+      ? "hackathon"
+      : postType === "RESEARCH" || postType === "GUEST_LECTURE"
+        ? "research"
+        : "project";
+
+  return {
+    id: uiId,
+    backendId: project.id,
+    type,
+    faculty: project.faculty?.profile?.fullName || "SRM Faculty",
+    dept: project.faculty?.department || "SRM",
+    designation: project.faculty?.designation || undefined,
+    time: new Date(project.createdAt).toLocaleDateString(),
+    title: project.title,
+    description: project.description,
+    skills: project.skills || [],
+    domain: project.domain,
+    duration: project.duration,
+    slots: project.slots,
+    remaining: Math.max(0, project.slots - applicationCount),
+    deadline: new Date(project.deadline).toLocaleDateString(),
+    rolesNeeded: project.skills?.join(", ") || "Team members",
+    teamSlots: `${applicationCount}/${project.slots} applications`,
+  };
 }
