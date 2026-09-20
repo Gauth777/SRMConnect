@@ -18,6 +18,11 @@ export class ProfilesController {
     return this.profilesService.getMe(req.user.id);
   }
 
+  @Get('faculty')
+  listFaculty() {
+    return this.profilesService.listFaculty();
+  }
+
   @Put('me/student')
   upsertStudent(
     @Req() req: AuthenticatedRequest,
