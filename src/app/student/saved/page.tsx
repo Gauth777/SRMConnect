@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
-import { ArrowLeft, BookmarkX, CalendarDays } from "lucide-react";
+import { ArrowLeft, CalendarDays, X } from "lucide-react";
 import { apiRequest } from "@/lib/api";
 
 interface SavedProjectRecord {
@@ -104,7 +104,7 @@ export default function SavedPage() {
                       disabled={workingId === project.id}
                       className="inline-flex items-center gap-2 rounded-xl border border-red-300 px-4 py-2 text-xs font-bold text-red-600 hover:bg-red-50 disabled:opacity-50"
                     >
-                      <BookmarkX className="h-4 w-4" /> {workingId === project.id ? "Removing…" : "Remove"}
+                      <X className="h-4 w-4" /> {workingId === project.id ? "Removing…" : "Remove"}
                     </button>
                   </div>
                 </article>
