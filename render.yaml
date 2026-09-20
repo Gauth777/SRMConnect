@@ -9,7 +9,7 @@ services:
     buildCommand: npm ci && npx prisma generate && npm run build
     startCommand: npm run start:prod
     healthCheckPath: /api/v1/health
-    autoDeployTrigger: commit
+    autoDeployTrigger: checksPass
     envVars:
       - key: NODE_ENV
         value: production
