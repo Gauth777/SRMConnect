@@ -4,8 +4,7 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
 import {
   Bookmark,
-  BookmarkCheck,
-  BriefcaseBusiness,
+  Home,
   CalendarDays,
   FileText,
   GraduationCap,
@@ -254,7 +253,7 @@ export default function FeedClient() {
 
       <div className="mx-auto grid max-w-7xl gap-6 px-4 py-6 md:grid-cols-[220px_minmax(0,1fr)] md:px-6">
         <aside className="h-fit rounded-2xl border border-[#ab9b8e]/20 bg-[#e0decd]/70 p-3 md:sticky md:top-20">
-          <NavButton icon={BriefcaseBusiness} label="Feed" onClick={() => router.push("/student/feed")} active />
+          <NavButton icon={Home} label="Feed" onClick={() => router.push("/student/feed")} active />
           <NavButton icon={FileText} label="My Applications" onClick={() => router.push("/student/applications")} />
           <NavButton icon={GraduationCap} label="Faculty Directory" onClick={() => router.push("/student/faculty")} />
           <NavButton icon={Bookmark} label="Saved Projects" onClick={() => router.push("/student/saved")} />
@@ -356,7 +355,7 @@ export default function FeedClient() {
                           disabled={busy}
                           className={`inline-flex items-center gap-1.5 rounded-xl border px-4 py-2 text-xs font-bold transition disabled:opacity-50 ${saved ? "border-[#8690a2] bg-[#8690a2]/10 text-[#8690a2]" : "border-[#ab9b8e]/40 text-[#5a5a5a] hover:bg-[#f5f3ec]"}`}
                         >
-                          {saved ? <BookmarkCheck className="h-4 w-4" /> : <Bookmark className="h-4 w-4" />}
+                          <Bookmark className={`h-4 w-4 ${saved ? "fill-current" : ""}`} />
                           {saved ? "Saved" : "Save"}
                         </button>
 
