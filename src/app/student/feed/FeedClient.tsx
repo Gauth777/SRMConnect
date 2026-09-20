@@ -97,7 +97,7 @@ interface RemoteProfile {
   } | null;
 }
 
-// Real projects come only from the NestJS API. No static/demo posts are rendered.
+// Projects rendered in the feed come only from the SRM Connect API.
 const MOCK_POSTS: Post[] = [];
 
 export default function FeedClient() {
@@ -334,20 +334,32 @@ export default function FeedClient() {
     ? `Year ${remoteProfile.student.currentYear}`
     : userProfile?.currentYear || "Year not set";
 
+  const studentSkillTags = (remoteProfile?.student?.skills || []).map((skill) => skill.name).slice(0, 3);
   const recommendedDomains = Array.from(
     new Set(remotePosts.map((post) => post.domain).filter((value): value is string => Boolean(value))),
   ).slice(0, 3);
-  const studentSkillTags = (remoteProfile?.student?.skills || []).map((skill) => skill.name).slice(0, 3);
   const recentPosts = remotePosts.slice(0, 2);
-  const recommendedPosts = remotePosts.slice(0, 3);
+  const recommendedPosts = remotePosts.slice(0, 3).map((post) => {
+    const projectSkills = post.skills || [];
+    const matchedSkills = studentSkillTags.filter((skill) =>
+      projectSkills.some((projectSkill) => projectSkill.toLowerCase() === skill.toLowerCase()),
+    ).length;
+    return {
+      title: post.title,
+      faculty: post.faculty || "SRM Faculty",
+      compatibility: studentSkillTags.length
+        ? Math.round((matchedSkills / studentSkillTags.length) * 100)
+        : 0,
+    };
+  });
   const activeFacultyCards = Array.from(
     remotePosts.reduce((map, post) => {
       if (!post.faculty) return map;
-      const current = map.get(post.faculty);
+      const existing = map.get(post.faculty);
       map.set(post.faculty, {
         name: post.faculty,
         dept: post.dept || "SRM",
-        slots: (current?.slots || 0) + (post.remaining || 0),
+        slots: (existing?.slots || 0) + (post.remaining || 0),
       });
       return map;
     }, new Map<string, { name: string; dept: string; slots: number }>()),
@@ -424,7 +436,7 @@ export default function FeedClient() {
                 <div>
                   <span className="font-bold text-[#8690a2] block mb-2 uppercase tracking-wider text-[10px]">Recommended for you</span>
                   <div className="flex flex-wrap gap-1.5">
-                    {recommendedDomains.map((tag) => (
+                    {recommendedDomains.length > 0 ? recommendedDomains.map((tag) => (
                       <button
                         key={tag}
                         onClick={() => { setSearchQuery(tag); setIsSearchFocused(false); }}
@@ -432,14 +444,14 @@ export default function FeedClient() {
                       >
                         {tag}
                       </button>
-                    ))}
+                    )) : <span className="text-[10px] text-[#ab9b8e]">No live project domains yet.</span>}
                   </div>
                 </div>
 
                 <div>
                   <span className="font-bold text-[#8690a2] block mb-2 uppercase tracking-wider text-[10px]">Based on your skills</span>
                   <div className="flex flex-wrap gap-1.5">
-                    {studentSkillTags.map((tag) => (
+                    {studentSkillTags.length > 0 ? studentSkillTags.map((tag) => (
                       <button
                         key={tag}
                         onClick={() => { setSearchQuery(tag); setIsSearchFocused(false); }}
@@ -447,23 +459,23 @@ export default function FeedClient() {
                       >
                         {tag}
                       </button>
-                    ))}
+                    )) : <span className="text-[10px] text-[#ab9b8e]">Add skills to your profile for suggestions.</span>}
                   </div>
                 </div>
 
                 <div>
                   <span className="font-bold text-[#8690a2] block mb-2 uppercase tracking-wider text-[10px]">Recently posted</span>
                   <div className="flex flex-col gap-1.5">
-                    {recentPosts.map((item, idx) => (
+                    {recentPosts.length > 0 ? recentPosts.map((item) => (
                       <div
-                        key={idx}
+                        key={item.id}
                         onClick={() => { setSearchQuery(item.title); setIsSearchFocused(false); }}
                         className="p-2 rounded-lg bg-[#f5f3ec] hover:bg-[#bdd1d3]/20 cursor-pointer flex items-center justify-between transition-colors border border-transparent hover:border-[#bdd1d3]"
                       >
                         <span className="font-semibold text-[#3a3a3a] truncate">{item.title}</span>
                         <span className="text-[9px] px-1.5 py-0.5 rounded bg-[#8690a2]/15 text-[#8690a2] font-bold">{item.type}</span>
                       </div>
-                    ))}
+                    )) : <span className="text-[10px] text-[#ab9b8e]">No projects posted yet.</span>}
                   </div>
                 </div>
               </motion.div>
@@ -492,13 +504,166 @@ export default function FeedClient() {
                   transition={{ duration: 0.2 }}
                   className="absolute right-0 top-[40px] w-72 bg-[#e0decd] rounded-2xl border border-[#ab9b8e]/40 shadow-xl z-50 py-2 text-xs"
                 >
-                  <div className="px-4 py-2 border-b border-[#ab9b8e]/20 flex justify-between items-center">
+                  <div className="px-4 py-2 border-b border-[#ab9b8e]/20">
                     <span className="font-bold text-[#8690a2] uppercase tracking-wider text-[10px]">Notifications</span>
-                    <span className="text-[9px] text-[#ab9b8e]">Live notifications coming next</span>
                   </div>
                   <div className="p-4 text-[11px] text-[#5a5a5a]">
                     No notifications yet.
                   </div>
+                </motion.div>
+              )}
+            </AnimatePresence>
+          </div>
+
+          {/* Invitations mail icon */}
+          <button
+            onClick={() => router.push("/student/invitations")}
+            className="p-1.5 rounded-full hover:bg-[#bdd1d3]/30 transition-colors text-[#8690a2] cursor-pointer relative"
+          >
+            <Mail className="w-5 h-5" />
+
+          </button>
+
+          {/* Profile Avatar circle */}
+          <div className="relative" ref={profileMenuRef}>
+            <button
+              onClick={() => setShowProfileMenu(!showProfileMenu)}
+              className="w-8 h-8 rounded-full bg-[#8690a2] text-white flex items-center justify-center font-bold text-sm border border-[#bdd1d3] shadow-sm hover:scale-105 transition-transform cursor-pointer"
+            >
+              {getInitials(currentUserName)}
+            </button>
+
+            {/* Profile Dropdown */}
+            <AnimatePresence>
+              {showProfileMenu && (
+                <motion.div
+                  initial={{ opacity: 0, y: -10 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  exit={{ opacity: 0, y: -10 }}
+                  transition={{ duration: 0.15 }}
+                  className="absolute right-0 top-[40px] w-48 bg-[#e0decd] rounded-xl border border-[#ab9b8e]/40 shadow-xl z-50 py-1.5 text-xs text-[#5a5a5a]"
+                >
+                  <div className="px-4 py-2 border-b border-[#ab9b8e]/20 flex flex-col gap-0.5">
+                    <span className="font-bold text-[#3a3a3a]">{currentUserName}</span>
+                    <span className="text-[10px] text-[#ab9b8e]">{currentUserDept} · {currentUserYear}</span>
+                  </div>
+                  
+                  <button
+                    onClick={() => { router.push("/student/profile"); setShowProfileMenu(false); }}
+                    className="w-full text-left px-4 py-2 hover:bg-[#bdd1d3]/30 hover:text-[#3a3a3a] flex items-center gap-2 cursor-pointer transition-colors"
+                  >
+                    <User className="w-3.5 h-3.5" />
+                    <span>My Profile</span>
+                  </button>
+
+                  <button
+                    onClick={() => { router.push("/student/setup"); setShowProfileMenu(false); }}
+                    className="w-full text-left px-4 py-2 hover:bg-[#bdd1d3]/30 hover:text-[#3a3a3a] flex items-center gap-2 cursor-pointer transition-colors"
+                  >
+                    <Settings className="w-3.5 h-3.5" />
+                    <span>Settings</span>
+                  </button>
+
+                  <div className="border-t border-[#ab9b8e]/20 my-1" />
+
+                  <button
+                    onClick={handleLogout}
+                    className="w-full text-left px-4 py-2 hover:bg-red-500/10 text-red-600 hover:text-red-700 font-semibold flex items-center gap-2 cursor-pointer transition-colors"
+                  >
+                    <LogOut className="w-3.5 h-3.5" />
+                    <span>Logout</span>
+                  </button>
+                </motion.div>
+              )}
+            </AnimatePresence>
+          </div>
+        </div>
+      </header>
+
+      {/* THREE COLUMN LAYOUT CONTAINER */}
+      <div className="flex-1 flex w-full pt-[56px]">
+
+        {/* LEFT SIDEBAR */}
+        <aside className="hidden md:flex flex-col w-[220px] fixed left-0 top-[56px] h-[calc(100vh-56px)] bg-[#e0decd] border-r border-[#ab9b8e]/25 z-30 justify-between py-4 px-3">
+          <div className="flex flex-col gap-6">
+            {/* Top profile mini card */}
+            <div className="bg-[#f5f3ec]/65 p-3 rounded-xl border border-[#ab9b8e]/20 flex flex-col gap-2">
+              <div className="flex items-center gap-2.5">
+                <div className="w-9 h-9 rounded-full bg-[#8690a2] text-white flex items-center justify-center font-bold text-sm">
+                  {getInitials(currentUserName)}
+                </div>
+                <div className="flex flex-col min-w-0">
+                  <span className="font-bold text-xs text-[#3a3a3a] truncate">{currentUserName}</span>
+                  <span className="text-[10px] text-[#5a5a5a] font-medium truncate">{currentUserDept} · {currentUserYear}</span>
+                </div>
+              </div>
+              <button
+                onClick={() => router.push("/student/profile")}
+                className="text-[10px] font-bold text-[#d2c296] hover:text-[#d2c296]/80 text-left cursor-pointer transition-colors mt-0.5"
+              >
+                View Profile →
+              </button>
+            </div>
+
+            {/* Navigation links */}
+            <nav className="flex flex-col gap-1">
+              {[
+                { label: "Home Feed", route: "/student/feed", icon: Home, active: true },
+                { label: "Browse Projects", route: "/student/browse", icon: SearchIcon },
+                { label: "My Applications", route: "/student/applications", icon: FileText },
+                { label: "My Profile", route: "/student/profile", icon: User },
+                { label: "Faculty Directory", route: "/student/faculty", icon: GraduationCap },
+                { label: "Leaderboard", route: "/student/leaderboard", icon: Trophy },
+                { label: "Saved Projects", route: "/student/saved", icon: Bookmark },
+                { label: "Invitations", route: "/student/invitations", icon: Mail }
+              ].map((item, idx) => {
+                const Icon = item.icon;
+                return (
+                  <button
+                    key={idx}
+                    onClick={() => router.push(item.route)}
+                    className={`w-full flex items-center gap-3 px-3 py-2 text-xs font-semibold rounded-[10px] transition-all cursor-pointer ${
+                      item.active
+                        ? "bg-[#8690a2] text-white shadow-sm"
+                        : "text-[#5a5a5a] hover:bg-[#bdd1d3]/30 hover:text-[#3a3a3a]"
+                    }`}
+                  >
+                    <Icon className="w-4 h-4" />
+                    <span>{item.label}</span>
+                  </button>
+                );
+              })}
+            </nav>
+          </div>
+
+          <div className="text-center">
+            <span className="text-[10px] text-[#ab9b8e] font-semibold">CampusConnect v1.0</span>
+          </div>
+        </aside>
+
+        {/* MAIN FEED (CENTER) */}
+        <main className="flex-1 flex flex-col md:ml-[220px] lg:mr-[240px] px-4 py-6 bg-[#f5f3ec] min-h-[calc(100vh-56px)]">
+          <div className="w-full max-w-[680px] mx-auto flex flex-col gap-4">
+            
+            {/* STICKY FILTER TABS */}
+            <div className="sticky top-[56px] z-20 bg-[#f5f3ec] py-3 border-b border-[#ab9b8e]/15 flex items-center gap-2 overflow-x-auto no-scrollbar scroll-smooth">
+              {["All", "Projects", "Hackathons", "Research", "Achievements"].map((tab) => {
+                const isActive = activeTab === tab;
+                return (
+                  <button
+                    key={tab}
+                    onClick={() => setActiveTab(tab)}
+                    className={`px-4 py-1.5 text-xs font-semibold rounded-[20px] border transition-all cursor-pointer whitespace-nowrap ${
+                      isActive
+                        ? "bg-[#8690a2] border-[#8690a2] text-white shadow-sm"
+                        : "border-[#bdd1d3] text-[#8690a2] hover:bg-[#bdd1d3]/20"
+                    }`}
+                  >
+                    {tab}
+                  </button>
+                );
+              })}
+            </div>
 
             {/* FEED CARDS SECTION */}
             <div className="flex flex-col gap-5 mt-2 pb-16">
@@ -915,18 +1080,14 @@ export default function FeedClient() {
 
         {/* RIGHT SIDEBAR */}
         <aside className="hidden lg:flex flex-col w-[240px] fixed right-0 top-[56px] h-[calc(100vh-56px)] bg-[#e0decd] border-l border-[#ab9b8e]/25 z-30 overflow-y-auto py-5 px-4 gap-6 scrollbar-thin">
-          
-          {/* SECTION 1: Recommended For You */}
           <div className="flex flex-col gap-3">
-            <span 
-              className="text-[#8690a2] text-[10px] font-extrabold uppercase tracking-widest block"
-            >
+            <span className="text-[#8690a2] text-[10px] font-extrabold uppercase tracking-widest block">
               Recommended for you
             </span>
             <div className="flex flex-col gap-2.5">
-              {recommendedPosts.map((item, idx) => (
+              {recommendedPosts.length > 0 ? recommendedPosts.map((item) => (
                 <div
-                  key={idx}
+                  key={item.title}
                   className="bg-[#f5f3ec] border border-[#bdd1d3] rounded-[10px] p-3 flex flex-col gap-1.5 shadow-sm hover:border-[#8690a2] transition-colors cursor-pointer"
                   onClick={() => setSearchQuery(item.title)}
                 >
@@ -936,34 +1097,93 @@ export default function FeedClient() {
                   </div>
                   <div className="flex flex-col gap-1">
                     <div className="flex justify-between items-center text-[9px] font-bold text-[#8690a2]">
-                      <span>Open slots</span>
-                      <span>{item.remaining ?? 0}/{item.slots ?? 0}</span>
+                      <span>Skill match</span>
+                      <span>{item.compatibility}%</span>
                     </div>
                     <div className="w-full h-1 bg-[#bdd1d3]/40 rounded-full overflow-hidden">
-                      <div
-                        className="h-full bg-[#d2c296]"
-                        style={{ width: `${Math.min(100, ((item.remaining ?? 0) / Math.max(1, item.slots ?? 1)) * 100)}%` }}
-                      />
+                      <div className="h-full bg-[#d2c296]" style={{ width: `${item.compatibility}%` }} />
                     </div>
                   </div>
                 </div>
-              ))}
+              )) : (
+                <div className="p-3 rounded-lg bg-[#f5f3ec]/60 border border-[#ab9b8e]/10 text-[10px] text-[#5a5a5a]">
+                  No live projects yet.
+                </div>
+              )}
             </div>
           </div>
 
           <hr className="border-[#ab9b8e]/20" />
 
-          {/* SECTION 2: Campus Talent Board (Top 3) */}
           <div className="flex flex-col gap-3">
-            <span 
-              className="text-[#8690a2] text-[10px] font-extrabold uppercase tracking-widest block"
-            >
+            <span className="text-[#8690a2] text-[10px] font-extrabold uppercase tracking-widest block">
               This Week&apos;s Leaders
             </span>
+            <div className="p-3 rounded-lg bg-[#f5f3ec]/60 border border-[#ab9b8e]/10 text-[10px] leading-relaxed text-[#5a5a5a]">
+              No leaderboard activity yet.
+            </div>
+          </div>
+
+          <hr className="border-[#ab9b8e]/20" />
+
+          <div className="flex flex-col gap-3">
+            <span className="text-[#8690a2] text-[10px] font-extrabold uppercase tracking-widest block">
+              Faculty Accepting Teams
+            </span>
             <div className="flex flex-col gap-2.5">
-              <div className="p-3 rounded-lg bg-[#f5f3ec]/60 border border-[#ab9b8e]/10 text-[10px] leading-relaxed text-[#5a5a5a]">
-                No leaderboard activity yet.
-              </div>
+              {activeFacultyCards.length > 0 ? activeFacultyCards.map((faculty) => (
+                <div
+                  key={faculty.name}
+                  className="bg-[#f5f3ec]/60 border border-[#ab9b8e]/15 rounded-lg p-2.5 flex flex-col gap-1 shadow-sm"
+                >
+                  <div className="flex flex-col">
+                    <span className="font-bold text-xs text-[#3a3a3a]">{faculty.name}</span>
+                    <span className="text-[9px] text-[#5a5a5a]">{faculty.dept}</span>
+                  </div>
+                  <div className="flex items-center justify-between mt-1 pt-1 border-t border-[#ab9b8e]/10">
+                    <span className="text-[9px] text-[#d2c296] font-bold uppercase tracking-wider">{faculty.slots} slots open</span>
+                    <button
+                      onClick={() => router.push("/student/faculty")}
+                      className="text-[9px] font-extrabold text-[#8690a2] hover:underline cursor-pointer"
+                    >
+                      View Profile →
+                    </button>
+                  </div>
+                </div>
+              )) : (
+                <div className="p-3 rounded-lg bg-[#f5f3ec]/60 border border-[#ab9b8e]/10 text-[10px] text-[#5a5a5a]">
+                  No faculty projects are open yet.
+                </div>
+              )}
+            </div>
+          </div>
+        </aside>
+
+      </div>
+
+      {/* MOBILE BOTTOM NAVIGATION BAR */}
+      <div className="fixed bottom-0 left-0 right-0 h-[56px] bg-[#e0decd] border-t border-[#ab9b8e]/30 z-40 md:hidden flex items-center justify-around px-2 shadow-lg">
+        {[
+          { label: "Home", icon: Home, active: true, action: () => { router.push("/student/feed"); } },
+          { label: "Search", icon: SearchIcon, action: () => { setIsSearchFocused(true); } },
+          { label: "Applications", icon: FileText, action: () => { router.push("/student/applications"); } },
+          { label: "Profile", icon: User, action: () => { router.push("/student/profile"); } },
+          { label: "More", icon: MoreHorizontal, action: () => { setShowMobileMore(true); } }
+        ].map((item, idx) => {
+          const Icon = item.icon;
+          return (
+            <button
+              key={idx}
+              onClick={item.action}
+              className="flex flex-col items-center justify-center py-1 flex-1 cursor-pointer transition-colors"
+            >
+              <Icon className={`w-5 h-5 ${item.active ? "text-[#8690a2]" : "text-[#ab9b8e]"}`} />
+              <span className={`text-[9px] font-bold mt-0.5 ${item.active ? "text-[#8690a2]" : "text-[#ab9b8e]"}`}>
+                {item.label}
+              </span>
+            </button>
+          );
+        })}
       </div>
 
       {/* MOBILE MORE SHEET / DRAWER */}
