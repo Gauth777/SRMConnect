@@ -1,35 +1,67 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import React, { useEffect, useMemo, useState, useRef, useSyncExternalStore } from "react";
 import { useRouter } from "next/navigation";
+import { motion, AnimatePresence } from "framer-motion";
 import {
-  Bookmark,
   Home,
-  CalendarDays,
+  Search as SearchIcon,
   FileText,
-  GraduationCap,
-  LogOut,
-  RefreshCw,
-  Search,
   User,
-  Users,
+  GraduationCap,
+  Trophy,
+  Bookmark,
+  Mail,
+  Bell,
+  LogOut,
+  Settings,
+  X,
+  CheckCircle,
+  MoreHorizontal,
+  Sparkles,
+  Users
 } from "lucide-react";
+import { safeParseJson } from "@/components/faculty/faculty-data";
 import { apiRequest } from "@/lib/api";
 import { getSupabaseBrowserClient } from "@/lib/supabase/client";
 
-interface StudentProfile {
-  id: string;
-  email: string;
-  fullName?: string | null;
-  role: "STUDENT" | "FACULTY" | "ADMIN";
-  student?: {
-    registrationNo: string;
-  } | null;
+// Types
+interface Post {
+  id: number;
+  backendId?: string;
+  type: "project" | "hackathon" | "achievement" | "research";
+  faculty?: string;
+  dept?: string;
+  time: string;
+  title: string;
+  description?: string;
+  skills?: string[];
+  domain?: string;
+  duration?: string;
+  slots?: number;
+  remaining?: number;
+  deadline?: string;
+  compatibility?: number;
+  rolesNeeded?: string;
+  teamSlots?: string;
+  studentName?: string;
+  verifiedBy?: string;
+  reactions?: number;
+  designation?: string;
 }
 
-interface FeedProject {
+interface CampusConnectUser {
+  role: string;
+  profileComplete: boolean;
+  loggedIn: boolean;
+  fullName?: string;
+  department?: string;
+  currentYear?: string;
+}
+
+interface RemoteProject {
   id: string;
-  postType: "PROJECT" | "HACKATHON" | "RESEARCH" | "INHOUSE" | "GUEST_LECTURE" | "WORKSHOP";
+  postType: string;
   title: string;
   domain: string;
   description: string;
@@ -48,365 +80,1109 @@ interface FeedProject {
   _count: { applications: number };
 }
 
-interface ApplicationRecord {
+interface RemoteApplication {
   projectId: string;
 }
 
-interface SavedProjectRecord {
+interface RemoteSavedProject {
   projectId: string;
 }
 
-const TABS = ["All", "Projects", "Hackathons", "Research"] as const;
+interface RemoteProfile {
+  fullName?: string | null;
+  student?: {
+    department?: string | null;
+    currentYear?: number | null;
+    skills?: Array<{ name: string; level: string }> | null;
+  } | null;
+}
+
+// Real projects come only from the NestJS API. No static/demo posts are rendered.
+const MOCK_POSTS: Post[] = [];
 
 export default function FeedClient() {
   const router = useRouter();
-  const [profile, setProfile] = useState<StudentProfile | null>(null);
-  const [projects, setProjects] = useState<FeedProject[]>([]);
-  const [appliedProjectIds, setAppliedProjectIds] = useState<string[]>([]);
-  const [savedProjectIds, setSavedProjectIds] = useState<string[]>([]);
-  const [activeTab, setActiveTab] = useState<(typeof TABS)[number]>("All");
+
+  // Authentication & Profile Setup Guard
+  const userProfile = useSyncExternalStore(subscribeToStorage, readStudentProfileSnapshot, () => null);
+
+  // States
+  const [remotePosts, setRemotePosts] = useState<Post[]>([]);
+  const [remoteProfile, setRemoteProfile] = useState<RemoteProfile | null>(null);
+  const [activeTab, setActiveTab] = useState<string>("All");
+  const [savedPostIds, setSavedPostIds] = useState<number[]>([]);
+  const [appliedPostIds, setAppliedPostIds] = useState<number[]>([]);
+  const [reactedPostIds, setReactedPostIds] = useState<number[]>([]);
+  const [remainingByPostId, setRemainingByPostId] = useState<Record<number, number>>({});
+  const [reactionByPostId, setReactionByPostId] = useState<Record<number, number>>({});
+  
+  // Interactive Nav UI States
+  const [isSearchFocused, setIsSearchFocused] = useState(false);
+  const [showNotifications, setShowNotifications] = useState(false);
+  const [showProfileMenu, setShowProfileMenu] = useState(false);
   const [searchQuery, setSearchQuery] = useState("");
-  const [loading, setLoading] = useState(true);
-  const [refreshing, setRefreshing] = useState(false);
-  const [workingProjectId, setWorkingProjectId] = useState<string | null>(null);
-  const [error, setError] = useState("");
-  const [toast, setToast] = useState("");
+  const [toastMessage, setToastMessage] = useState<string | null>(null);
 
-  const loadFeed = useCallback(async (quiet = false) => {
-    if (!quiet) setLoading(true);
-    setError("");
+  // Mobile Bottom Sheet Navigation
+  const [showMobileMore, setShowMobileMore] = useState(false);
 
-    try {
-      const supabase = getSupabaseBrowserClient();
-      const { data: userData, error: userError } = await supabase.auth.getUser();
-      if (userError || !userData.user) {
-        router.replace("/login/student");
-        return;
-      }
-
-      const [profileRecord, projectRecords, applications, savedProjects] = await Promise.all([
-        apiRequest<StudentProfile>("/profiles/me"),
-        apiRequest<FeedProject[]>("/projects"),
-        apiRequest<ApplicationRecord[]>("/applications/me"),
-        apiRequest<SavedProjectRecord[]>("/saved-projects/me"),
-      ]);
-
-      if (profileRecord.role !== "STUDENT") {
-        throw new Error("This account is not registered as a student.");
-      }
-
-      setProfile(profileRecord);
-      setProjects(projectRecords);
-      setAppliedProjectIds(applications.map((application) => application.projectId));
-      setSavedProjectIds(savedProjects.map((saved) => saved.projectId));
-    } catch (requestError) {
-      setError(requestError instanceof Error ? requestError.message : "Could not load the student feed.");
-    } finally {
-      setLoading(false);
-      setRefreshing(false);
-    }
-  }, [router]);
+  // Refs for closing dropdowns when clicking outside
+  const searchRef = useRef<HTMLDivElement>(null);
+  const notificationRef = useRef<HTMLDivElement>(null);
+  const profileMenuRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
+    if (!userProfile) {
+      router.push("/login/student");
+      return;
+    }
+
+    if (!userProfile.loggedIn) {
+      router.push("/login/student");
+      return;
+    }
+
+    if (userProfile.profileComplete === false) {
+      router.push("/student/setup");
+    }
+  }, [router, userProfile]);
+
+  useEffect(() => {
+    if (!userProfile?.loggedIn || userProfile.profileComplete === false) return;
+
+    let cancelled = false;
+    const loadFeed = async () => {
+      try {
+        const [projects, applications, savedProjects, profile] = await Promise.all([
+          apiRequest<RemoteProject[]>("/projects"),
+          apiRequest<RemoteApplication[]>("/applications/me"),
+          apiRequest<RemoteSavedProject[]>("/saved-projects/me"),
+          apiRequest<RemoteProfile>("/profiles/me"),
+        ]);
+        if (cancelled) return;
+        setRemotePosts(projects.map(mapRemoteProject));
+        setAppliedPostIds(applications.map((application) => uiIdFromUuid(application.projectId)));
+        setSavedPostIds(savedProjects.map((saved) => uiIdFromUuid(saved.projectId)));
+        setRemoteProfile(profile);
+      } catch (error) {
+        if (!cancelled) {
+          triggerToast(error instanceof Error ? error.message : "Could not load the live project feed.");
+        }
+      }
+    };
+
     void loadFeed();
-  }, [loadFeed]);
+    return () => { cancelled = true; };
+  }, [userProfile]);
 
-  const filteredProjects = useMemo(() => {
-    const query = searchQuery.trim().toLowerCase();
+  // Click outside listener for dropdowns
+  useEffect(() => {
+    function handleClickOutside(event: MouseEvent) {
+      if (searchRef.current && !searchRef.current.contains(event.target as Node)) {
+        setIsSearchFocused(false);
+      }
+      if (notificationRef.current && !notificationRef.current.contains(event.target as Node)) {
+        setShowNotifications(false);
+      }
+      if (profileMenuRef.current && !profileMenuRef.current.contains(event.target as Node)) {
+        setShowProfileMenu(false);
+      }
+    }
+    document.addEventListener("mousedown", handleClickOutside);
+    return () => {
+      document.removeEventListener("mousedown", handleClickOutside);
+    };
+  }, []);
 
-    return projects.filter((project) => {
-      const matchesTab =
-        activeTab === "All" ||
-        (activeTab === "Projects" && ["PROJECT", "INHOUSE", "WORKSHOP", "GUEST_LECTURE"].includes(project.postType)) ||
-        (activeTab === "Hackathons" && project.postType === "HACKATHON") ||
-        (activeTab === "Research" && project.postType === "RESEARCH");
-
-      if (!matchesTab) return false;
-      if (!query) return true;
-
-      return [
-        project.title,
-        project.domain,
-        project.description,
-        project.faculty.profile.fullName || "",
-        project.faculty.department || "",
-        ...project.skills,
-      ].some((value) => value.toLowerCase().includes(query));
-    });
-  }, [activeTab, projects, searchQuery]);
-
-  const showToast = (message: string) => {
-    setToast(message);
-    window.setTimeout(() => setToast(""), 2600);
+  // Show a temporary success toast
+  const triggerToast = (msg: string) => {
+    setToastMessage(msg);
+    setTimeout(() => {
+      setToastMessage(null);
+    }, 3000);
   };
 
-  const applyToProject = async (project: FeedProject) => {
-    if (appliedProjectIds.includes(project.id)) return;
+  const handleLogout = async () => {
+    await getSupabaseBrowserClient().auth.signOut({ scope: "local" });
+    localStorage.removeItem("campusconnect_user");
+    router.push("/");
+  };
 
-    setWorkingProjectId(project.id);
-    setError("");
+  // Toggle Save
+  const toggleSave = async (post: Post) => {
+    if (!post.backendId) {
+      triggerToast("This project is not connected to the database.");
+      return;
+    }
+
+    const exists = savedPostIds.includes(post.id);
     try {
-      await apiRequest(`/applications/projects/${project.id}`, {
+      await apiRequest(`/saved-projects/${post.backendId}`, {
+        method: exists ? "DELETE" : "POST",
+      });
+      setSavedPostIds((prev) =>
+        exists ? prev.filter((pid) => pid !== post.id) : [...prev, post.id],
+      );
+      triggerToast(exists ? "Project removed from saved list" : "Project saved successfully!");
+    } catch (error) {
+      triggerToast(error instanceof Error ? error.message : "Could not update saved project.");
+    }
+  };
+
+  // Toggle Apply/Join
+  const toggleApply = async (post: Post, type: string) => {
+    if (appliedPostIds.includes(post.id)) return;
+
+    if (!post.backendId) {
+      triggerToast("This project is not connected to the database.");
+      return;
+    }
+
+    try {
+      await apiRequest(`/applications/projects/${post.backendId}`, {
         method: "POST",
         body: JSON.stringify({}),
       });
 
-      setAppliedProjectIds((current) => [...current, project.id]);
-      setProjects((current) =>
-        current.map((item) =>
-          item.id === project.id
-            ? { ...item, _count: { applications: item._count.applications + 1 } }
-            : item,
-        ),
-      );
-      showToast("Application submitted. It is now available in My Applications.");
-    } catch (requestError) {
-      setError(requestError instanceof Error ? requestError.message : "Could not submit application.");
-    } finally {
-      setWorkingProjectId(null);
-    }
-  };
-
-  const toggleSaved = async (project: FeedProject) => {
-    const isSaved = savedProjectIds.includes(project.id);
-    setWorkingProjectId(project.id);
-    setError("");
-
-    try {
-      await apiRequest(`/saved-projects/${project.id}`, {
-        method: isSaved ? "DELETE" : "POST",
+      setAppliedPostIds((prev) => [...prev, post.id]);
+      setRemainingByPostId((current) => {
+        const nextRemaining = current[post.id] ?? post.remaining ?? getBaseRemaining(post.id);
+        if (nextRemaining <= 0) return current;
+        return { ...current, [post.id]: nextRemaining - 1 };
       });
 
-      setSavedProjectIds((current) =>
-        isSaved ? current.filter((id) => id !== project.id) : [...current, project.id],
-      );
-      showToast(isSaved ? "Removed from Saved Projects." : "Saved project.");
-    } catch (requestError) {
-      setError(requestError instanceof Error ? requestError.message : "Could not update saved project.");
-    } finally {
-      setWorkingProjectId(null);
+      const actionText = type === "hackathon" ? "Joined team successfully!" : "Application submitted successfully!";
+      triggerToast(actionText);
+    } catch (error) {
+      triggerToast(error instanceof Error ? error.message : "Could not submit your application.");
     }
   };
 
-  const logout = async () => {
-    await getSupabaseBrowserClient().auth.signOut({ scope: "local" });
-    localStorage.removeItem("campusconnect_user");
-    router.replace("/");
+  // Toggle Reaction on Achievement
+  const handleReact = (id: number) => {
+    const isReacted = reactedPostIds.includes(id);
+    if (isReacted) {
+      setReactedPostIds((prev) => prev.filter((rid) => rid !== id));
+      setReactionByPostId((current) => ({
+        ...current,
+        [id]: Math.max(0, (current[id] ?? getBaseReactions(id)) - 1),
+      }));
+    } else {
+      setReactedPostIds((prev) => [...prev, id]);
+      setReactionByPostId((current) => ({
+        ...current,
+        [id]: (current[id] ?? getBaseReactions(id)) + 1,
+      }));
+    }
   };
 
-  if (loading) {
+  const posts = useMemo(() => {
+    return remotePosts.map((post) => {
+      const remaining = remainingByPostId[post.id];
+      const reactions = reactionByPostId[post.id];
+      return {
+        ...post,
+        remaining: remaining !== undefined ? remaining : post.remaining,
+        reactions: reactions !== undefined ? reactions : post.reactions,
+      };
+    });
+  }, [remotePosts, remainingByPostId, reactionByPostId]);
+
+  // Filter logic
+  const filteredPosts = posts.filter((post) => {
+    if (activeTab === "All") return true;
+    if (activeTab === "Projects") return post.type === "project";
+    if (activeTab === "Hackathons") return post.type === "hackathon";
+    if (activeTab === "Research") return post.type === "research";
+    if (activeTab === "Achievements") return post.type === "achievement";
+    return true;
+  }).filter((post) => {
+    if (!searchQuery) return true;
+    const query = searchQuery.toLowerCase();
+    const titleMatch = post.title.toLowerCase().includes(query);
+    const descMatch = post.description?.toLowerCase().includes(query) || false;
+    const facultyMatch = post.faculty?.toLowerCase().includes(query) || false;
+    const skillMatch = post.skills?.some((s) => s.toLowerCase().includes(query)) || false;
+    const authorMatch = post.studentName?.toLowerCase().includes(query) || false;
+    return titleMatch || descMatch || facultyMatch || skillMatch || authorMatch;
+  });
+
+  if (!userProfile) {
     return (
-      <main className="flex min-h-screen items-center justify-center bg-[#f5f3ec] text-[#8690a2]">
-        <div className="text-center">
-          <RefreshCw className="mx-auto h-8 w-8 animate-spin" />
-          <p className="mt-3 text-sm font-semibold">Loading your SRM Connect feed…</p>
+      <div className="w-full min-h-screen bg-[#f5f3ec] flex flex-col items-center justify-center">
+        <div className="flex flex-col items-center gap-4">
+          <div className="w-10 h-10 rounded-full border-4 border-[#8690a2] border-t-transparent animate-spin" />
+          <p className="text-sm font-semibold tracking-wider text-[#8690a2] font-inter">Securing feed connection...</p>
         </div>
-      </main>
+      </div>
     );
   }
 
+  // Get Initials helper
+  const getInitials = (name: string) => {
+    return name
+      .split(" ")
+      .map((n) => n[0])
+      .join("")
+      .toUpperCase()
+      .substring(0, 2);
+  };
+
+  const currentUserName = remoteProfile?.fullName || userProfile?.fullName || "Student";
+  const currentUserDept = remoteProfile?.student?.department || userProfile?.department || "Department not set";
+  const currentUserYear = remoteProfile?.student?.currentYear
+    ? `Year ${remoteProfile.student.currentYear}`
+    : userProfile?.currentYear || "Year not set";
+
+  const recommendedDomains = Array.from(
+    new Set(remotePosts.map((post) => post.domain).filter((value): value is string => Boolean(value))),
+  ).slice(0, 3);
+  const studentSkillTags = (remoteProfile?.student?.skills || []).map((skill) => skill.name).slice(0, 3);
+  const recentPosts = remotePosts.slice(0, 2);
+  const recommendedPosts = remotePosts.slice(0, 3);
+  const activeFacultyCards = Array.from(
+    remotePosts.reduce((map, post) => {
+      if (!post.faculty) return map;
+      const current = map.get(post.faculty);
+      map.set(post.faculty, {
+        name: post.faculty,
+        dept: post.dept || "SRM",
+        slots: (current?.slots || 0) + (post.remaining || 0),
+      });
+      return map;
+    }, new Map<string, { name: string; dept: string; slots: number }>()),
+  ).map(([, value]) => value).slice(0, 3);
+
   return (
-    <div className="min-h-screen bg-[#f5f3ec] text-[#3a3a3a]">
-      <header className="sticky top-0 z-40 border-b border-[#ab9b8e]/25 bg-[#e0decd]/95 backdrop-blur">
-        <div className="mx-auto flex max-w-7xl items-center justify-between gap-4 px-4 py-3 md:px-6">
-          <button onClick={() => router.push("/student/feed")} className="font-playfair text-2xl font-extrabold text-[#8690a2]">
+    <motion.div
+      initial={{ opacity: 0, y: 15 }}
+      animate={{ opacity: 1, y: 0 }}
+      transition={{ duration: 0.4 }}
+      className="min-h-screen w-full bg-[#f5f3ec] text-[#3a3a3a] select-none flex flex-col relative"
+      style={{ fontFamily: "'Inter', sans-serif" }}
+    >
+      {/* Toast Notification */}
+      <AnimatePresence>
+        {toastMessage && (
+          <motion.div
+            initial={{ opacity: 0, y: 50, scale: 0.9 }}
+            animate={{ opacity: 1, y: 0, scale: 1 }}
+            exit={{ opacity: 0, y: 20, scale: 0.9 }}
+            className="fixed bottom-20 left-1/2 -translate-x-1/2 z-50 bg-[#8690a2] text-white px-5 py-3 rounded-xl shadow-lg border border-[#bdd1d3]/40 flex items-center gap-2 font-semibold text-sm max-w-sm text-center"
+          >
+            <CheckCircle className="w-4 h-4 text-[#bdd1d3]" />
+            <span>{toastMessage}</span>
+          </motion.div>
+        )}
+      </AnimatePresence>
+
+      {/* NAVBAR */}
+      <header className="fixed top-0 left-0 right-0 h-[56px] bg-[#e0decd] border-b border-[#ab9b8e]/30 z-50 px-4 md:px-6 flex items-center justify-between">
+        {/* Left Section: Logo */}
+        <div className="flex items-center gap-2 cursor-pointer" onClick={() => router.push("/student/feed")}>
+          <span 
+            className="text-xl md:text-2xl font-extrabold text-[#8690a2] tracking-tight"
+            style={{ fontFamily: "'Playfair Display', Georgia, serif" }}
+          >
             CampusConnect
-          </button>
-
-          <div className="hidden max-w-xl flex-1 md:block">
-            <div className="relative">
-              <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-[#ab9b8e]" />
-              <input
-                value={searchQuery}
-                onChange={(event) => setSearchQuery(event.target.value)}
-                placeholder="Search faculty projects, domains or skills"
-                className="w-full rounded-full border border-[#bdd1d3] bg-[#f5f3ec] py-2 pl-10 pr-4 text-sm outline-none focus:border-[#8690a2]"
-              />
-            </div>
-          </div>
-
-          <div className="flex items-center gap-2">
-            <button
-              onClick={() => {
-                setRefreshing(true);
-                void loadFeed(true);
-              }}
-              disabled={refreshing}
-              className="rounded-xl border border-[#ab9b8e]/30 p-2 text-[#8690a2] hover:bg-white/50 disabled:opacity-50"
-              title="Refresh feed"
-            >
-              <RefreshCw className={`h-4 w-4 ${refreshing ? "animate-spin" : ""}`} />
-            </button>
-            <button
-              onClick={() => router.push("/student/profile")}
-              className="hidden rounded-xl border border-[#ab9b8e]/30 px-3 py-2 text-left text-xs font-semibold text-[#5a5a5a] sm:block"
-            >
-              <span className="block text-[#8690a2]">{profile?.fullName || "Student"}</span>
-              <span>{profile?.student?.registrationNo}</span>
-            </button>
-            <button onClick={logout} className="rounded-xl p-2 text-red-600 hover:bg-red-50" title="Logout">
-              <LogOut className="h-4 w-4" />
-            </button>
-          </div>
+          </span>
         </div>
-      </header>
 
-      <div className="mx-auto grid max-w-7xl gap-6 px-4 py-6 md:grid-cols-[220px_minmax(0,1fr)] md:px-6">
-        <aside className="h-fit rounded-2xl border border-[#ab9b8e]/20 bg-[#e0decd]/70 p-3 md:sticky md:top-20">
-          <NavButton icon={Home} label="Feed" onClick={() => router.push("/student/feed")} active />
-          <NavButton icon={FileText} label="My Applications" onClick={() => router.push("/student/applications")} />
-          <NavButton icon={GraduationCap} label="Faculty Directory" onClick={() => router.push("/student/faculty")} />
-          <NavButton icon={Bookmark} label="Saved Projects" onClick={() => router.push("/student/saved")} />
-          <NavButton icon={User} label="My Profile" onClick={() => router.push("/student/profile")} />
-        </aside>
+        {/* Center Section: Search Bar */}
+        <div className="relative hidden md:block" ref={searchRef}>
+          <div className="relative w-[320px]">
+            <input
+              type="text"
+              placeholder="Search projects, faculty, skills..."
+              value={searchQuery}
+              onChange={(e) => setSearchQuery(e.target.value)}
+              onFocus={() => setIsSearchFocused(true)}
+              className="w-full h-9 pl-9 pr-4 rounded-full bg-[#f5f3ec] border border-[#bdd1d3] text-sm text-[#3a3a3a] placeholder-[#ab9b8e] focus:outline-none focus:border-[#8690a2] transition-colors"
+            />
+            <SearchIcon className="w-4 h-4 text-[#ab9b8e] absolute left-3 top-1/2 -translate-y-1/2" />
+            
+            {searchQuery && (
+              <button 
+                onClick={() => setSearchQuery("")} 
+                className="absolute right-3 top-1/2 -translate-y-1/2 text-[#ab9b8e] hover:text-[#3a3a3a]"
+              >
+                <X className="w-3.5 h-3.5" />
+              </button>
+            )}
+          </div>
 
-        <main className="min-w-0">
-          <div className="mb-6 flex flex-col gap-4">
-            <div>
-              <p className="text-xs font-bold uppercase tracking-[0.2em] text-[#ab9b8e]">Student feed</p>
-              <h1 className="mt-1 font-playfair text-3xl font-extrabold text-[#8690a2]">Faculty opportunities</h1>
-              <p className="mt-2 text-sm text-[#5a5a5a]">Only projects published by registered faculty are shown here.</p>
-            </div>
+          {/* Search Dropdown Panel */}
+          <AnimatePresence>
+            {isSearchFocused && (
+              <motion.div
+                initial={{ opacity: 0, y: -8 }}
+                animate={{ opacity: 1, y: 0 }}
+                exit={{ opacity: 0, y: -8 }}
+                transition={{ duration: 0.15 }}
+                className="absolute top-[44px] left-0 w-[320px] bg-[#e0decd] rounded-2xl border border-[#ab9b8e]/40 shadow-xl p-4 z-50 flex flex-col gap-4 text-xs"
+              >
+                <div>
+                  <span className="font-bold text-[#8690a2] block mb-2 uppercase tracking-wider text-[10px]">Recommended for you</span>
+                  <div className="flex flex-wrap gap-1.5">
+                    {recommendedDomains.map((tag) => (
+                      <button
+                        key={tag}
+                        onClick={() => { setSearchQuery(tag); setIsSearchFocused(false); }}
+                        className="px-2.5 py-1 rounded-full bg-[#f5f3ec] hover:bg-[#bdd1d3]/40 border border-[#bdd1d3] text-[#5a5a5a] cursor-pointer transition-colors"
+                      >
+                        {tag}
+                      </button>
+                    ))}
+                  </div>
+                </div>
 
-            <div className="relative md:hidden">
-              <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-[#ab9b8e]" />
-              <input
-                value={searchQuery}
-                onChange={(event) => setSearchQuery(event.target.value)}
-                placeholder="Search projects"
-                className="w-full rounded-xl border border-[#bdd1d3] bg-white/70 py-2.5 pl-10 pr-4 text-sm outline-none"
-              />
-            </div>
+                <div>
+                  <span className="font-bold text-[#8690a2] block mb-2 uppercase tracking-wider text-[10px]">Based on your skills</span>
+                  <div className="flex flex-wrap gap-1.5">
+                    {studentSkillTags.map((tag) => (
+                      <button
+                        key={tag}
+                        onClick={() => { setSearchQuery(tag); setIsSearchFocused(false); }}
+                        className="px-2.5 py-1 rounded-full bg-[#f5f3ec] hover:bg-[#bdd1d3]/40 border border-[#bdd1d3] text-[#5a5a5a] cursor-pointer transition-colors"
+                      >
+                        {tag}
+                      </button>
+                    ))}
+                  </div>
+                </div>
 
-            <div className="flex flex-wrap gap-2">
-              {TABS.map((tab) => (
-                <button
-                  key={tab}
-                  onClick={() => setActiveTab(tab)}
-                  className={`rounded-full px-4 py-2 text-xs font-bold transition ${activeTab === tab ? "bg-[#8690a2] text-white" : "border border-[#ab9b8e]/30 bg-white/60 text-[#5a5a5a] hover:bg-white"}`}
+                <div>
+                  <span className="font-bold text-[#8690a2] block mb-2 uppercase tracking-wider text-[10px]">Recently posted</span>
+                  <div className="flex flex-col gap-1.5">
+                    {recentPosts.map((item, idx) => (
+                      <div
+                        key={idx}
+                        onClick={() => { setSearchQuery(item.title); setIsSearchFocused(false); }}
+                        className="p-2 rounded-lg bg-[#f5f3ec] hover:bg-[#bdd1d3]/20 cursor-pointer flex items-center justify-between transition-colors border border-transparent hover:border-[#bdd1d3]"
+                      >
+                        <span className="font-semibold text-[#3a3a3a] truncate">{item.title}</span>
+                        <span className="text-[9px] px-1.5 py-0.5 rounded bg-[#8690a2]/15 text-[#8690a2] font-bold">{item.type}</span>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              </motion.div>
+            )}
+          </AnimatePresence>
+        </div>
+
+        {/* Right Section: Icons & Profile */}
+        <div className="flex items-center gap-3">
+          {/* Notifications bell */}
+          <div className="relative" ref={notificationRef}>
+            <button
+              onClick={() => setShowNotifications(!showNotifications)}
+              className="p-1.5 rounded-full hover:bg-[#bdd1d3]/30 transition-colors text-[#8690a2] cursor-pointer relative"
+            >
+              <Bell className="w-5 h-5" />
+            </button>
+
+            {/* Notification Dropdown */}
+            <AnimatePresence>
+              {showNotifications && (
+                <motion.div
+                  initial={{ opacity: 0, y: -10 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  exit={{ opacity: 0, y: -10 }}
+                  transition={{ duration: 0.2 }}
+                  className="absolute right-0 top-[40px] w-72 bg-[#e0decd] rounded-2xl border border-[#ab9b8e]/40 shadow-xl z-50 py-2 text-xs"
                 >
-                  {tab}
-                </button>
+                  <div className="px-4 py-2 border-b border-[#ab9b8e]/20 flex justify-between items-center">
+                    <span className="font-bold text-[#8690a2] uppercase tracking-wider text-[10px]">Notifications</span>
+                    <span className="text-[9px] text-[#ab9b8e]">Live notifications coming next</span>
+                  </div>
+                  <div className="p-4 text-[11px] text-[#5a5a5a]">
+                    No notifications yet.
+                  </div>
+
+            {/* FEED CARDS SECTION */}
+            <div className="flex flex-col gap-5 mt-2 pb-16">
+              <AnimatePresence mode="wait">
+                {filteredPosts.length > 0 ? (
+                  <motion.div
+                    key={activeTab + searchQuery}
+                    initial={{ opacity: 0 }}
+                    animate={{ opacity: 1 }}
+                    exit={{ opacity: 0 }}
+                    className="flex flex-col gap-5"
+                  >
+                    {filteredPosts.map((post, index) => {
+                      const isSaved = savedPostIds.includes(post.id);
+                      const isApplied = appliedPostIds.includes(post.id);
+                      const isReacted = reactedPostIds.includes(post.id);
+
+                      // Project Card
+                      if (post.type === "project") {
+                        return (
+                          <motion.div
+                            key={post.id}
+                            initial={{ opacity: 0, y: 30 }}
+                            animate={{ opacity: 1, y: 0 }}
+                            transition={{ duration: 0.4, delay: index * 0.08 }}
+                            className="bg-[#e0decd]/80 border border-[#ab9b8e]/25 rounded-[16px] p-5 shadow-sm hover:shadow-md transition-shadow relative overflow-hidden"
+                          >
+                            {/* Card Header */}
+                            <div className="flex items-center justify-between mb-3">
+                              <div className="flex items-center gap-2.5">
+                                <div className="w-10 h-10 rounded-full bg-gradient-to-br from-[#8690a2] to-[#bdd1d3] text-white flex items-center justify-center font-bold text-sm shadow-inner">
+                                  {post.faculty ? getInitials(post.faculty) : "FC"}
+                                </div>
+                                <div className="flex flex-col">
+                                  <span className="font-bold text-xs text-[#3a3a3a]">{post.faculty} · {post.dept} Dept</span>
+                                  <span className="text-[10px] text-[#5a5a5a] font-medium">{post.time}</span>
+                                </div>
+                              </div>
+                            </div>
+
+                            <hr className="border-[#ab9b8e]/25 my-3" />
+
+                            {/* Tags */}
+                            <div className="flex items-center gap-2 mb-3">
+                              <span className="bg-[#8690a2] text-white px-2 py-0.5 rounded-full text-[9px] font-bold tracking-wider uppercase flex items-center gap-1">
+                                🚀 PROJECT
+                              </span>
+                              {post.domain && (
+                                <span className="bg-[#d2c296]/20 border border-[#d2c296] text-[#8690a2] px-2 py-0.5 rounded-full text-[9px] font-bold">
+                                  {post.domain}
+                                </span>
+                              )}
+                            </div>
+
+                            {/* Title & Description */}
+                            <h2 
+                              className="text-base md:text-lg font-bold text-[#8690a2] mb-1.5 leading-snug"
+                              style={{ fontFamily: "'Playfair Display', Georgia, serif" }}
+                            >
+                              &ldquo;{post.title}&rdquo;
+                            </h2>
+                            <p className="text-xs text-[#5a5a5a] mb-4 leading-relaxed">{post.description}</p>
+
+                            {/* Project details list */}
+                            <div className="flex flex-col gap-2 bg-[#f5f3ec]/40 p-3 rounded-lg border border-[#ab9b8e]/15 mb-4 text-xs text-[#5a5a5a]">
+                              {post.skills && (
+                                <div className="flex items-center flex-wrap gap-1.5">
+                                  <span className="font-bold text-[#3a3a3a] mr-1">Skills needed:</span>
+                                  {post.skills.map((skill) => (
+                                    <span key={skill} className="px-2 py-0.5 bg-[#f5f3ec] border border-[#bdd1d3] text-[#5a5a5a] rounded text-[10px] font-semibold">
+                                      {skill}
+                                    </span>
+                                  ))}
+                                </div>
+                              )}
+                              
+                              <div className="grid grid-cols-2 md:grid-cols-3 gap-2 mt-1.5 pt-1.5 border-t border-[#ab9b8e]/10">
+                                <div>
+                                  <span className="font-bold text-[#3a3a3a]">Duration: </span>{post.duration}
+                                </div>
+                                <div>
+                                  <span className="font-bold text-[#3a3a3a]">Students: </span>{post.slots} ({post.remaining} left)
+                                </div>
+                                <div className="col-span-2 md:col-span-1">
+                                  <span className="font-bold text-[#3a3a3a]">Deadline: </span>{post.deadline}
+                                </div>
+                              </div>
+                            </div>
+
+                            <hr className="border-[#ab9b8e]/25 my-3" />
+
+                            {/* Actions / Compatibility */}
+                            <div className="flex items-center justify-between mt-2">
+                              {post.compatibility && (
+                                <span className="bg-[#d2c296] text-[#3a3a3a] font-bold text-[10px] px-2.5 py-1 rounded-full shadow-sm">
+                                  ⚡ {post.compatibility}% match
+                                </span>
+                              )}
+                              
+                              <div className="flex items-center gap-2">
+                                <motion.button
+                                  whileTap={{ scale: 0.95 }}
+                                  onClick={() => void toggleSave(post)}
+                                  className={`px-3 py-1.5 rounded-lg border border-[#ab9b8e] text-xs font-semibold flex items-center gap-1.5 transition-all cursor-pointer ${
+                                    isSaved 
+                                      ? "bg-[#d2c296] border-[#d2c296] text-[#3a3a3a]" 
+                                      : "text-[#8690a2] hover:bg-[#e0decd]"
+                                  }`}
+                                >
+                                  <Bookmark className={`w-3.5 h-3.5 ${isSaved ? "fill-[#3a3a3a]" : ""}`} />
+                                  <span>{isSaved ? "Saved" : "Save"}</span>
+                                </motion.button>
+
+                                <motion.button
+                                  whileTap={{ scale: 0.96 }}
+                                  onClick={() => toggleApply(post, "project")}
+                                  disabled={isApplied}
+                                  className={`px-4 py-1.5 rounded-lg text-xs font-bold transition-all flex items-center gap-1 cursor-pointer ${
+                                    isApplied
+                                      ? "bg-[#ab9b8e] text-white cursor-not-allowed"
+                                      : "bg-[#8690a2] text-white hover:bg-[#bdd1d3] hover:text-[#3a3a3a] shadow-sm"
+                                  }`}
+                                >
+                                  <span>{isApplied ? "Applied ✓" : "Apply →"}</span>
+                                </motion.button>
+                              </div>
+                            </div>
+                          </motion.div>
+                        );
+                      }
+
+                      // Hackathon Card
+                      if (post.type === "hackathon") {
+                        return (
+                          <motion.div
+                            key={post.id}
+                            initial={{ opacity: 0, y: 30 }}
+                            animate={{ opacity: 1, y: 0 }}
+                            transition={{ duration: 0.4, delay: index * 0.08 }}
+                            className="bg-[#e0decd]/80 border border-[#ab9b8e]/25 rounded-[16px] p-5 shadow-sm hover:shadow-md transition-shadow relative overflow-hidden"
+                          >
+                            <div className="flex items-center justify-between mb-3">
+                              <div className="flex items-center gap-2.5">
+                                <div className="w-10 h-10 rounded-full bg-gradient-to-br from-[#8690a2] to-[#bdd1d3] text-white flex items-center justify-center font-bold text-sm shadow-inner">
+                                  {post.faculty ? getInitials(post.faculty) : "HK"}
+                                </div>
+                                <div className="flex flex-col">
+                                  <span className="font-bold text-xs text-[#3a3a3a]">{post.faculty} · {post.dept}</span>
+                                  <span className="text-[10px] text-[#5a5a5a] font-medium">{post.time}</span>
+                                </div>
+                              </div>
+                            </div>
+
+                            <hr className="border-[#ab9b8e]/25 my-3" />
+
+                            <div className="flex items-center gap-2 mb-3">
+                              <span className="bg-[#d2c296] text-[#3a3a3a] px-2 py-0.5 rounded-full text-[9px] font-bold tracking-wider uppercase flex items-center gap-1">
+                                🏆 HACKATHON
+                              </span>
+                            </div>
+
+                            <h2 
+                              className="text-base md:text-lg font-bold text-[#8690a2] mb-1.5 leading-snug"
+                              style={{ fontFamily: "'Playfair Display', Georgia, serif" }}
+                            >
+                              &ldquo;{post.title}&rdquo;
+                            </h2>
+                            <p className="text-xs text-[#5a5a5a] mb-4 leading-relaxed">{post.description}</p>
+
+                            <div className="flex flex-col gap-2 bg-[#f5f3ec]/40 p-3 rounded-lg border border-[#ab9b8e]/15 mb-4 text-xs text-[#5a5a5a]">
+                              <div>
+                                <span className="font-bold text-[#3a3a3a]">Need: </span>
+                                <span className="text-[#8690a2] font-semibold">{post.rolesNeeded}</span>
+                              </div>
+                              <div className="grid grid-cols-2 gap-2 mt-1.5 pt-1.5 border-t border-[#ab9b8e]/10">
+                                <div>
+                                  <span className="font-bold text-[#3a3a3a]">Team Slots: </span>{post.teamSlots}
+                                </div>
+                                <div>
+                                  <span className="font-bold text-[#3a3a3a]">Deadline: </span>{post.deadline}
+                                </div>
+                              </div>
+                            </div>
+
+                            <hr className="border-[#ab9b8e]/25 my-3" />
+
+                            <div className="flex items-center justify-between mt-2">
+                              {post.compatibility && (
+                                <span className="bg-[#d2c296] text-[#3a3a3a] font-bold text-[10px] px-2.5 py-1 rounded-full shadow-sm">
+                                  ⚡ {post.compatibility}% match
+                                </span>
+                              )}
+                              
+                              <div className="flex items-center gap-2">
+                                <motion.button
+                                  whileTap={{ scale: 0.95 }}
+                                  onClick={() => void toggleSave(post)}
+                                  className={`px-3 py-1.5 rounded-lg border border-[#ab9b8e] text-xs font-semibold flex items-center gap-1.5 transition-all cursor-pointer ${
+                                    isSaved 
+                                      ? "bg-[#d2c296] border-[#d2c296] text-[#3a3a3a]" 
+                                      : "text-[#8690a2] hover:bg-[#e0decd]"
+                                  }`}
+                                >
+                                  <Bookmark className={`w-3.5 h-3.5 ${isSaved ? "fill-[#3a3a3a]" : ""}`} />
+                                  <span>{isSaved ? "Saved" : "Save"}</span>
+                                </motion.button>
+
+                                <motion.button
+                                  whileTap={{ scale: 0.96 }}
+                                  onClick={() => toggleApply(post, "hackathon")}
+                                  disabled={isApplied}
+                                  className={`px-4 py-1.5 rounded-lg text-xs font-bold transition-all flex items-center gap-1 cursor-pointer ${
+                                    isApplied
+                                      ? "bg-[#ab9b8e] text-white cursor-not-allowed"
+                                      : "bg-[#8690a2] text-white hover:bg-[#bdd1d3] hover:text-[#3a3a3a] shadow-sm"
+                                  }`}
+                                >
+                                  <span>{isApplied ? "Joined Team ✓" : "Join Team →"}</span>
+                                </motion.button>
+                              </div>
+                            </div>
+                          </motion.div>
+                        );
+                      }
+
+                      // Achievement Card
+                      if (post.type === "achievement") {
+                        return (
+                          <motion.div
+                            key={post.id}
+                            initial={{ opacity: 0, y: 30 }}
+                            animate={{ opacity: 1, y: 0 }}
+                            transition={{ duration: 0.4, delay: index * 0.08 }}
+                            className="bg-[#e0decd]/80 border border-[#ab9b8e]/25 rounded-[16px] p-4 shadow-sm hover:shadow-md transition-shadow relative overflow-hidden"
+                          >
+                            <div className="flex items-center justify-between mb-2">
+                              <div className="flex items-center gap-2">
+                                <div className="w-8 h-8 rounded-full bg-[#bdd1d3] text-[#3a3a3a] flex items-center justify-center font-bold text-xs">
+                                  {post.studentName ? getInitials(post.studentName) : "ST"}
+                                </div>
+                                <div className="flex flex-col">
+                                  <span className="font-bold text-xs text-[#3a3a3a]">{post.studentName}</span>
+                                  <span className="text-[9px] text-[#5a5a5a] font-medium">{post.time}</span>
+                                </div>
+                              </div>
+                              <span className="bg-[#bdd1d3] text-[#3a3a3a] px-2.5 py-0.5 rounded-full text-[9px] font-bold tracking-wider uppercase">
+                                🏅 ACHIEVEMENT
+                              </span>
+                            </div>
+
+                            <div className="mt-2.5 pl-1">
+                              <h2 
+                                className="text-sm md:text-base font-bold text-[#8690a2] mb-1 leading-snug"
+                                style={{ fontFamily: "'Playfair Display', Georgia, serif" }}
+                              >
+                                {post.title}
+                              </h2>
+                              
+                              {post.verifiedBy && (
+                                <p className="text-[10px] text-[#8690a2] font-semibold flex items-center gap-1 mt-1">
+                                  <span>✅</span> {post.verifiedBy}
+                                </p>
+                              )}
+                            </div>
+
+                            <hr className="border-[#ab9b8e]/20 my-3" />
+
+                            <div className="flex items-center justify-between pl-1">
+                              <span className="text-[10px] text-[#5a5a5a] font-semibold">
+                                👏 {post.reactions} {post.reactions === 1 ? "person reacted" : "people reacted"}
+                              </span>
+
+                              <motion.button
+                                whileTap={{ scale: 0.9 }}
+                                onClick={() => handleReact(post.id)}
+                                className={`px-3 py-1 rounded-full border text-[10px] font-bold flex items-center gap-1.5 cursor-pointer transition-all ${
+                                  isReacted
+                                    ? "bg-[#8690a2] border-[#8690a2] text-white"
+                                    : "border-[#ab9b8e] text-[#8690a2] hover:bg-[#bdd1d3]/30"
+                                }`}
+                              >
+                                <motion.span
+                                  animate={isReacted ? { y: [0, -10, 0], scale: [1, 1.3, 1] } : {}}
+                                  transition={{ duration: 0.3 }}
+                                  className="inline-block"
+                                >
+                                  👏
+                                </motion.span>
+                                <span>{isReacted ? "Reacted" : "React"}</span>
+                              </motion.button>
+                            </div>
+                          </motion.div>
+                        );
+                      }
+
+                      // Faculty Research Card
+                      if (post.type === "research") {
+                        return (
+                          <motion.div
+                            key={post.id}
+                            initial={{ opacity: 0, y: 30 }}
+                            animate={{ opacity: 1, y: 0 }}
+                            transition={{ duration: 0.4, delay: index * 0.08 }}
+                            className="bg-[#e0decd]/80 border border-[#ab9b8e]/25 rounded-[16px] p-5 shadow-sm hover:shadow-md transition-shadow relative overflow-hidden"
+                          >
+                            <div className="flex items-center justify-between mb-3">
+                              <div className="flex items-center gap-2.5">
+                                <div className="w-10 h-10 rounded-full bg-gradient-to-br from-[#8690a2] to-[#ab9b8e] text-white flex items-center justify-center font-bold text-sm shadow-inner">
+                                  {post.faculty ? getInitials(post.faculty) : "FC"}
+                                </div>
+                                <div className="flex flex-col">
+                                  <span className="font-bold text-xs text-[#3a3a3a]">{post.faculty}</span>
+                                  <span className="text-[10px] text-[#5a5a5a] font-medium">{post.designation} · {post.dept}</span>
+                                </div>
+                              </div>
+                              <span className="text-[10px] text-[#ab9b8e] font-semibold">{post.time}</span>
+                            </div>
+
+                            <hr className="border-[#ab9b8e]/25 my-3" />
+
+                            <div className="flex items-center gap-2 mb-3">
+                              <span className="bg-[#ab9b8e] text-white px-2.5 py-0.5 rounded-full text-[9px] font-bold tracking-wider uppercase">
+                                🔬 RESEARCH
+                              </span>
+                            </div>
+
+                            <h2 
+                              className="text-base md:text-lg font-bold text-[#8690a2] mb-1.5 leading-snug"
+                              style={{ fontFamily: "'Playfair Display', Georgia, serif" }}
+                            >
+                              &ldquo;{post.title}&rdquo;
+                            </h2>
+                            <p className="text-xs text-[#5a5a5a] mb-3.5 leading-relaxed">{post.description}</p>
+                            
+                            <p className="text-xs text-[#8690a2] font-bold italic mb-4">
+                              &ldquo;Looking for research assistants with background in {post.domain || "relevant areas"}.&rdquo;
+                            </p>
+
+                            <hr className="border-[#ab9b8e]/25 my-3" />
+
+                            <div className="flex items-center justify-between mt-2">
+                              {post.compatibility && (
+                                <span className="bg-[#d2c296] text-[#3a3a3a] font-bold text-[10px] px-2.5 py-1 rounded-full shadow-sm">
+                                  ⚡ {post.compatibility}% match
+                                </span>
+                              )}
+                              
+                              <div className="flex items-center gap-2">
+                                <motion.button
+                                  whileTap={{ scale: 0.95 }}
+                                  onClick={() => void toggleSave(post)}
+                                  className={`px-3 py-1.5 rounded-lg border border-[#ab9b8e] text-xs font-semibold flex items-center gap-1.5 transition-all cursor-pointer ${
+                                    isSaved 
+                                      ? "bg-[#d2c296] border-[#d2c296] text-[#3a3a3a]" 
+                                      : "text-[#8690a2] hover:bg-[#e0decd]"
+                                  }`}
+                                >
+                                  <Bookmark className={`w-3.5 h-3.5 ${isSaved ? "fill-[#3a3a3a]" : ""}`} />
+                                  <span>{isSaved ? "Saved" : "Save"}</span>
+                                </motion.button>
+
+                                <motion.button
+                                  whileTap={{ scale: 0.96 }}
+                                  onClick={() => toggleApply(post, "research")}
+                                  disabled={isApplied}
+                                  className={`px-4 py-1.5 rounded-lg text-xs font-bold transition-all flex items-center gap-1 cursor-pointer ${
+                                    isApplied
+                                      ? "bg-[#ab9b8e] text-white cursor-not-allowed"
+                                      : "bg-[#8690a2] text-white hover:bg-[#bdd1d3] hover:text-[#3a3a3a] shadow-sm"
+                                  }`}
+                                >
+                                  <span>{isApplied ? "Applied ✓" : "Apply →"}</span>
+                                </motion.button>
+                              </div>
+                            </div>
+                          </motion.div>
+                        );
+                      }
+
+                      return null;
+                    })}
+                  </motion.div>
+                ) : (
+                  <motion.div
+                    initial={{ opacity: 0, y: 10 }}
+                    animate={{ opacity: 1, y: 0 }}
+                    exit={{ opacity: 0 }}
+                    className="p-8 text-center bg-[#e0decd]/40 border border-[#bdd1d3] rounded-2xl flex flex-col items-center gap-2.5"
+                  >
+                    <Sparkles className="w-8 h-8 text-[#ab9b8e]" />
+                    <p className="font-bold text-sm text-[#8690a2]">
+                      {remotePosts.length === 0 ? "No faculty projects have been posted yet" : "No matching posts found"}
+                    </p>
+                    <p className="text-xs text-[#5a5a5a]">
+                      {remotePosts.length === 0
+                        ? "Once a faculty member publishes a project, it will appear here automatically."
+                        : "Try clearing search filters or queries."}
+                    </p>
+                    {searchQuery && (
+                      <button
+                        onClick={() => setSearchQuery("")}
+                        className="px-3.5 py-1.5 rounded-lg bg-[#8690a2] text-white text-xs font-bold hover:bg-[#bdd1d3] hover:text-[#3a3a3a] mt-2 transition-colors cursor-pointer"
+                      >
+                        Reset Search
+                      </button>
+                    )}
+                  </motion.div>
+                )}
+              </AnimatePresence>
+            </div>
+
+          </div>
+        </main>
+
+        {/* RIGHT SIDEBAR */}
+        <aside className="hidden lg:flex flex-col w-[240px] fixed right-0 top-[56px] h-[calc(100vh-56px)] bg-[#e0decd] border-l border-[#ab9b8e]/25 z-30 overflow-y-auto py-5 px-4 gap-6 scrollbar-thin">
+          
+          {/* SECTION 1: Recommended For You */}
+          <div className="flex flex-col gap-3">
+            <span 
+              className="text-[#8690a2] text-[10px] font-extrabold uppercase tracking-widest block"
+            >
+              Recommended for you
+            </span>
+            <div className="flex flex-col gap-2.5">
+              {recommendedPosts.map((item, idx) => (
+                <div
+                  key={idx}
+                  className="bg-[#f5f3ec] border border-[#bdd1d3] rounded-[10px] p-3 flex flex-col gap-1.5 shadow-sm hover:border-[#8690a2] transition-colors cursor-pointer"
+                  onClick={() => setSearchQuery(item.title)}
+                >
+                  <div className="flex flex-col">
+                    <span className="font-bold text-xs text-[#3a3a3a] truncate">{item.title}</span>
+                    <span className="text-[9px] text-[#5a5a5a]">{item.faculty}</span>
+                  </div>
+                  <div className="flex flex-col gap-1">
+                    <div className="flex justify-between items-center text-[9px] font-bold text-[#8690a2]">
+                      <span>Open slots</span>
+                      <span>{item.remaining ?? 0}/{item.slots ?? 0}</span>
+                    </div>
+                    <div className="w-full h-1 bg-[#bdd1d3]/40 rounded-full overflow-hidden">
+                      <div
+                        className="h-full bg-[#d2c296]"
+                        style={{ width: `${Math.min(100, ((item.remaining ?? 0) / Math.max(1, item.slots ?? 1)) * 100)}%` }}
+                      />
+                    </div>
+                  </div>
+                </div>
               ))}
             </div>
           </div>
 
-          {error && <div className="mb-5 rounded-xl border border-red-300 bg-red-50 px-4 py-3 text-sm text-red-700">{error}</div>}
+          <hr className="border-[#ab9b8e]/20" />
 
-          {filteredProjects.length === 0 ? (
-            <div className="rounded-2xl border border-dashed border-[#ab9b8e]/40 bg-[#e0decd]/45 p-10 text-center">
-              <Users className="mx-auto h-9 w-9 text-[#ab9b8e]" />
-              <h2 className="mt-4 text-lg font-extrabold text-[#8690a2]">
-                {projects.length === 0 ? "No faculty projects have been posted yet" : "No matching projects"}
-              </h2>
-              <p className="mx-auto mt-2 max-w-lg text-sm text-[#5a5a5a]">
-                {projects.length === 0
-                  ? "Once a faculty member publishes a project, it will appear here automatically."
-                  : "Try another search term or clear the current filter."}
-              </p>
-            </div>
-          ) : (
-            <div className="grid gap-4">
-              {filteredProjects.map((project) => {
-                const applied = appliedProjectIds.includes(project.id);
-                const saved = savedProjectIds.includes(project.id);
-                const remaining = Math.max(0, project.slots - project._count.applications);
-                const busy = workingProjectId === project.id;
-
-                return (
-                  <article key={project.id} className="rounded-2xl border border-[#ab9b8e]/25 bg-white/75 p-5 shadow-sm">
-                    <div className="flex flex-col justify-between gap-5 lg:flex-row lg:items-start">
-                      <div className="min-w-0 flex-1">
-                        <div className="mb-3 flex flex-wrap items-center gap-2 text-[10px] font-extrabold uppercase tracking-wider">
-                          <span className="rounded-full bg-[#8690a2]/10 px-2.5 py-1 text-[#8690a2]">{formatPostType(project.postType)}</span>
-                          <span className="rounded-full bg-[#bdd1d3]/35 px-2.5 py-1 text-[#5a5a5a]">{project.domain}</span>
-                          <span className="rounded-full bg-[#e0decd] px-2.5 py-1 text-[#5a5a5a]">{project.mode}</span>
-                        </div>
-
-                        <h2 className="text-xl font-extrabold text-[#3a3a3a]">{project.title}</h2>
-                        <p className="mt-1 text-sm font-semibold text-[#8690a2]">
-                          {project.faculty.profile.fullName || "SRM Faculty"}
-                          {project.faculty.department ? ` · ${project.faculty.department}` : ""}
-                          {project.faculty.designation ? ` · ${project.faculty.designation}` : ""}
-                        </p>
-                        <p className="mt-3 text-sm leading-6 text-[#5a5a5a]">{project.description}</p>
-
-                        {project.skills.length > 0 && (
-                          <div className="mt-4 flex flex-wrap gap-2">
-                            {project.skills.map((skill) => (
-                              <span key={skill} className="rounded-full border border-[#bdd1d3] bg-[#f5f3ec] px-2.5 py-1 text-[11px] font-semibold text-[#5a5a5a]">
-                                {skill}
-                              </span>
-                            ))}
-                          </div>
-                        )}
-
-                        <div className="mt-4 flex flex-wrap gap-x-5 gap-y-2 text-xs text-[#5a5a5a]">
-                          <span className="inline-flex items-center gap-1.5"><CalendarDays className="h-3.5 w-3.5" /> Deadline {new Date(project.deadline).toLocaleDateString()}</span>
-                          <span>{project.duration}</span>
-                          <span>{remaining} of {project.slots} slots remaining</span>
-                          <span>{project.skillLevel.replaceAll("_", " ")}</span>
-                        </div>
-                      </div>
-
-                      <div className="flex shrink-0 gap-2">
-                        <button
-                          onClick={() => void toggleSaved(project)}
-                          disabled={busy}
-                          className={`inline-flex items-center gap-1.5 rounded-xl border px-4 py-2 text-xs font-bold transition disabled:opacity-50 ${saved ? "border-[#8690a2] bg-[#8690a2]/10 text-[#8690a2]" : "border-[#ab9b8e]/40 text-[#5a5a5a] hover:bg-[#f5f3ec]"}`}
-                        >
-                          <Bookmark className={`h-4 w-4 ${saved ? "fill-current" : ""}`} />
-                          {saved ? "Saved" : "Save"}
-                        </button>
-
-                        <button
-                          onClick={() => void applyToProject(project)}
-                          disabled={applied || busy}
-                          className="rounded-xl bg-[#8690a2] px-4 py-2 text-xs font-bold text-white transition hover:bg-[#748092] disabled:cursor-not-allowed disabled:bg-[#ab9b8e]"
-                        >
-                          {applied ? "Applied ✓" : busy ? "Working…" : "Apply"}
-                        </button>
-                      </div>
-                    </div>
-                  </article>
-                );
-              })}
-            </div>
-          )}
-        </main>
+          {/* SECTION 2: Campus Talent Board (Top 3) */}
+          <div className="flex flex-col gap-3">
+            <span 
+              className="text-[#8690a2] text-[10px] font-extrabold uppercase tracking-widest block"
+            >
+              This Week&apos;s Leaders
+            </span>
+            <div className="flex flex-col gap-2.5">
+              <div className="p-3 rounded-lg bg-[#f5f3ec]/60 border border-[#ab9b8e]/10 text-[10px] leading-relaxed text-[#5a5a5a]">
+                No leaderboard activity yet.
+              </div>
       </div>
 
-      {toast && <div className="fixed bottom-6 left-1/2 z-50 -translate-x-1/2 rounded-xl bg-[#3a3a3a] px-5 py-3 text-sm font-semibold text-white shadow-xl">{toast}</div>}
-    </div>
+      {/* MOBILE MORE SHEET / DRAWER */}
+      <AnimatePresence>
+        {showMobileMore && (
+          <>
+            <motion.div
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 0.5 }}
+              exit={{ opacity: 0 }}
+              onClick={() => setShowMobileMore(false)}
+              className="fixed inset-0 bg-black z-40 md:hidden"
+            />
+            <motion.div
+              initial={{ y: "100%" }}
+              animate={{ y: 0 }}
+              exit={{ y: "100%" }}
+              transition={{ type: "spring", damping: 25, stiffness: 220 }}
+              className="fixed bottom-0 left-0 right-0 bg-[#e0decd] border-t border-[#ab9b8e]/40 rounded-t-[20px] p-5 z-50 md:hidden flex flex-col gap-4"
+            >
+              <div className="flex justify-between items-center border-b border-[#ab9b8e]/20 pb-2">
+                <span className="font-bold text-[#8690a2] text-sm uppercase tracking-wider">More Campus Options</span>
+                <button
+                  onClick={() => setShowMobileMore(false)}
+                  className="p-1 rounded-full bg-[#f5f3ec] text-[#ab9b8e] hover:text-[#3a3a3a]"
+                >
+                  <X className="w-4 h-4" />
+                </button>
+              </div>
+              <div className="grid grid-cols-2 gap-3 py-2">
+                {[
+                  { label: "Faculty Directory", route: "/student/faculty", icon: GraduationCap },
+                  { label: "Leaderboard", route: "/student/leaderboard", icon: Trophy },
+                  { label: "Saved Projects", route: "/student/saved", icon: Bookmark },
+                  { label: "Invitations", route: "/student/invitations", icon: Mail },
+                  { label: "Setup Profile", route: "/student/setup", icon: Settings }
+                ].map((item, idx) => {
+                  const Icon = item.icon;
+                  return (
+                    <button
+                      key={idx}
+                      onClick={() => { router.push(item.route); setShowMobileMore(false); }}
+                      className="flex items-center gap-2.5 p-3 rounded-xl bg-[#f5f3ec] hover:bg-[#bdd1d3]/30 border border-[#ab9b8e]/20 transition-all cursor-pointer text-left"
+                    >
+                      <Icon className="w-4 h-4 text-[#8690a2]" />
+                      <span className="text-xs font-semibold text-[#3a3a3a]">{item.label}</span>
+                    </button>
+                  );
+                })}
+              </div>
+              <button
+                onClick={handleLogout}
+                className="w-full py-3 bg-red-500/10 hover:bg-red-500/20 text-red-600 hover:text-red-700 font-bold rounded-xl text-center text-xs flex items-center justify-center gap-2 border border-red-500/20 cursor-pointer mt-1"
+              >
+                <LogOut className="w-4 h-4" />
+                <span>Logout Session</span>
+              </button>
+            </motion.div>
+          </>
+        )}
+      </AnimatePresence>
+
+      {/* MOBILE SEARCH PANEL EXPANSION */}
+      <AnimatePresence>
+        {isSearchFocused && (
+          <motion.div
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            className="fixed inset-0 bg-[#f5f3ec] z-50 p-4 md:hidden flex flex-col gap-4 overflow-y-auto"
+          >
+            <div className="flex items-center gap-3">
+              <div className="relative flex-1">
+                <input
+                  type="text"
+                  placeholder="Search projects, faculty, skills..."
+                  value={searchQuery}
+                  onChange={(e) => setSearchQuery(e.target.value)}
+                  autoFocus
+                  className="w-full h-10 pl-10 pr-4 rounded-full bg-[#e0decd] border border-[#bdd1d3] text-sm text-[#3a3a3a] placeholder-[#ab9b8e] focus:outline-none"
+                />
+                <SearchIcon className="w-4 h-4 text-[#ab9b8e] absolute left-3.5 top-1/2 -translate-y-1/2" />
+              </div>
+              <button
+                onClick={() => { setIsSearchFocused(false); }}
+                className="px-3 py-2 text-xs font-bold text-[#8690a2] bg-[#e0decd] border border-[#bdd1d3] rounded-full"
+              >
+                Cancel
+              </button>
+            </div>
+
+            <div className="flex flex-col gap-4 mt-2">
+              <div>
+                <span className="font-bold text-[#8690a2] block mb-2 uppercase tracking-wider text-[10px]">Recommended for you</span>
+                <div className="flex flex-wrap gap-2">
+                  {recommendedDomains.map((tag) => (
+                    <button
+                      key={tag}
+                      onClick={() => { setSearchQuery(tag); setIsSearchFocused(false); }}
+                      className="px-3 py-1.5 rounded-full bg-[#e0decd] hover:bg-[#bdd1d3] text-[#3a3a3a] border border-[#ab9b8e]/25 text-xs font-semibold cursor-pointer"
+                    >
+                      {tag}
+                    </button>
+                  ))}
+                </div>
+              </div>
+
+              <div>
+                <span className="font-bold text-[#8690a2] block mb-2 uppercase tracking-wider text-[10px]">Based on your skills</span>
+                <div className="flex flex-wrap gap-2">
+                  {studentSkillTags.map((tag) => (
+                    <button
+                      key={tag}
+                      onClick={() => { setSearchQuery(tag); setIsSearchFocused(false); }}
+                      className="px-3 py-1.5 rounded-full bg-[#e0decd] hover:bg-[#bdd1d3] text-[#3a3a3a] border border-[#ab9b8e]/25 text-xs font-semibold cursor-pointer"
+                    >
+                      {tag}
+                    </button>
+                  ))}
+                </div>
+              </div>
+
+              <div>
+                <span className="font-bold text-[#8690a2] block mb-2 uppercase tracking-wider text-[10px]">Recently posted</span>
+                <div className="flex flex-col gap-2">
+                  {recentPosts.map((item, idx) => (
+                    <div
+                      key={idx}
+                      onClick={() => { setSearchQuery(item.title); setIsSearchFocused(false); }}
+                      className="p-3 rounded-xl bg-[#e0decd]/75 hover:bg-[#bdd1d3]/35 cursor-pointer flex items-center justify-between transition-colors border border-[#ab9b8e]/20"
+                    >
+                      <span className="font-bold text-xs text-[#3a3a3a] truncate">{item.title}</span>
+                      <span className="text-[9px] px-2 py-0.5 rounded bg-[#8690a2] text-white font-bold">{item.type}</span>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            </div>
+          </motion.div>
+        )}
+      </AnimatePresence>
+    </motion.div>
   );
 }
 
-function NavButton({
-  icon: Icon,
-  label,
-  onClick,
-  active = false,
-}: {
-  icon: typeof User;
-  label: string;
-  onClick: () => void;
-  active?: boolean;
-}) {
-  return (
-    <button
-      onClick={onClick}
-      className={`mb-1 flex w-full items-center gap-3 rounded-xl px-3 py-2.5 text-left text-sm font-semibold transition ${active ? "bg-[#8690a2] text-white" : "text-[#5a5a5a] hover:bg-white/60"}`}
-    >
-      <Icon className="h-4 w-4" />
-      {label}
-    </button>
-  );
+function subscribeToStorage(callback: () => void) {
+  if (typeof window === "undefined") {
+    return () => undefined;
+  }
+
+  window.addEventListener("storage", callback);
+  return () => window.removeEventListener("storage", callback);
 }
 
-function formatPostType(type: FeedProject["postType"]) {
-  return type
-    .toLowerCase()
-    .split("_")
-    .map((part) => part.charAt(0).toUpperCase() + part.slice(1))
-    .join(" ");
+let cachedStudentProfileRaw: string | null | undefined;
+let cachedStudentProfile: CampusConnectUser | null = null;
+
+function readStudentProfileSnapshot() {
+  if (typeof window === "undefined") {
+    return null;
+  }
+
+  const raw = window.localStorage.getItem("campusconnect_user");
+  if (raw === cachedStudentProfileRaw) {
+    return cachedStudentProfile;
+  }
+
+  cachedStudentProfileRaw = raw;
+  cachedStudentProfile = safeParseJson<CampusConnectUser | null>(raw, null);
+  return cachedStudentProfile;
+}
+
+function getBaseRemaining(id: number) {
+  const post = MOCK_POSTS.find((item) => item.id === id);
+  return post?.remaining ?? 0;
+}
+
+function getBaseReactions(id: number) {
+  const post = MOCK_POSTS.find((item) => item.id === id);
+  return post?.reactions ?? 0;
+}
+
+
+function uiIdFromUuid(value: string) {
+  let hash = 0;
+  for (let index = 0; index < value.length; index += 1) {
+    hash = ((hash << 5) - hash + value.charCodeAt(index)) | 0;
+  }
+  return -Math.abs(hash || 1);
+}
+
+function mapRemoteProject(project: RemoteProject): Post {
+  const uiId = uiIdFromUuid(project.id);
+  const applicationCount = project._count?.applications ?? 0;
+  const postType = project.postType.toUpperCase();
+  const type: Post["type"] =
+    postType === "HACKATHON"
+      ? "hackathon"
+      : postType === "RESEARCH" || postType === "GUEST_LECTURE"
+        ? "research"
+        : "project";
+
+  return {
+    id: uiId,
+    backendId: project.id,
+    type,
+    faculty: project.faculty?.profile?.fullName || "SRM Faculty",
+    dept: project.faculty?.department || "SRM",
+    designation: project.faculty?.designation || undefined,
+    time: new Date(project.createdAt).toLocaleDateString(),
+    title: project.title,
+    description: project.description,
+    skills: project.skills || [],
+    domain: project.domain,
+    duration: project.duration,
+    slots: project.slots,
+    remaining: Math.max(0, project.slots - applicationCount),
+    deadline: new Date(project.deadline).toLocaleDateString(),
+    rolesNeeded: project.skills?.join(", ") || "Team members",
+    teamSlots: `${applicationCount}/${project.slots} applications`,
+  };
 }
