@@ -31,6 +31,16 @@ export class ProfilesService {
     return profile;
   }
 
+  listFaculty() {
+    return this.prisma.faculty.findMany({
+      include: {
+        profile: true,
+        _count: { select: { projects: true } },
+      },
+      orderBy: { createdAt: 'desc' },
+    });
+  }
+
   async upsertStudent(user: User, dto: UpsertStudentProfileDto) {
     const email = this.requireEmail(user);
 
