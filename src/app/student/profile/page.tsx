@@ -4,11 +4,8 @@ import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import {
   ArrowLeft,
-  BriefcaseBusiness,
   ExternalLink,
-  Github,
   GraduationCap,
-  Linkedin,
   Mail,
   Pencil,
   UserRound,
@@ -129,10 +126,10 @@ export default function ProfilePage() {
               </Section>
 
               <Section title="Links">
-                <ProfileLink icon={Github} label="GitHub" href={student.githubUrl} />
-                <ProfileLink icon={Linkedin} label="LinkedIn" href={student.linkedinUrl} />
-                <ProfileLink icon={BriefcaseBusiness} label="Portfolio" href={student.portfolioUrl} />
-                <ProfileLink icon={ExternalLink} label="Other link" href={student.otherLink} />
+                <ProfileLink label="GitHub" href={student.githubUrl} />
+                <ProfileLink label="LinkedIn" href={student.linkedinUrl} />
+                <ProfileLink label="Portfolio" href={student.portfolioUrl} />
+                <ProfileLink label="Other link" href={student.otherLink} />
               </Section>
             </div>
           </>
@@ -176,18 +173,16 @@ function TagGroup({ label, values }: { label: string; values: string[] }) {
 }
 
 function ProfileLink({
-  icon: Icon,
   label,
   href,
 }: {
-  icon: typeof Github;
   label: string;
   href?: string | null;
 }) {
   if (!href) return <Info label={label} value="Not set" />;
   return (
     <a href={href} target="_blank" rel="noreferrer" className="flex items-center justify-between rounded-xl bg-white/60 px-3 py-2 text-sm font-semibold text-[#5a5a5a] hover:bg-white">
-      <span className="inline-flex items-center gap-2"><Icon className="h-4 w-4" /> {label}</span>
+      <span>{label}</span>
       <ExternalLink className="h-3.5 w-3.5" />
     </a>
   );
