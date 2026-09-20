@@ -1,8 +1,8 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
-import { ArrowLeft, CalendarDays, CheckCircle2, Clock3, XCircle } from "lucide-react";
+import { ArrowLeft, CalendarDays, CheckCircle2, Clock3, RefreshCw, XCircle } from "lucide-react";
 import { apiRequest } from "@/lib/api";
 
 interface StudentApplication {
@@ -14,7 +14,6 @@ interface StudentApplication {
     title: string;
     domain: string;
     deadline: string;
-    status: string;
     faculty: {
       department?: string | null;
       profile: { fullName?: string | null };
@@ -29,18 +28,21 @@ export default function ApplicationsPage() {
   const [error, setError] = useState("");
   const [updatingId, setUpdatingId] = useState<string | null>(null);
 
-  useEffect(() => {
-    const user = JSON.parse(localStorage.getItem("campusconnect_user") || "null");
-    if (!user?.loggedIn || user.role !== "student") {
-      router.push("/login/student");
-      return;
+  const loadApplications = useCallback(async () => {
+    setLoading(true);
+    setError("");
+    try {
+      setApplications(await apiRequest<StudentApplication[]>("/applications/me"));
+    } catch (requestError) {
+      setError(requestError instanceof Error ? requestError.message : "Could not load applications.");
+    } finally {
+      setLoading(false);
     }
+  }, []);
 
-    apiRequest<StudentApplication[]>("/applications/me")
-      .then(setApplications)
-      .catch((requestError) => setError(requestError instanceof Error ? requestError.message : "Could not load applications."))
-      .finally(() => setLoading(false));
-  }, [router]);
+  useEffect(() => {
+    void loadApplications();
+  }, [loadApplications]);
 
   const withdraw = async (applicationId: string) => {
     setUpdatingId(applicationId);
@@ -62,14 +64,19 @@ export default function ApplicationsPage() {
   return (
     <main className="min-h-screen bg-[#f5f3ec] px-4 py-8 text-[#3a3a3a] md:px-8">
       <div className="mx-auto max-w-5xl">
-        <button onClick={() => router.push("/student/feed")} className="mb-6 inline-flex items-center gap-2 text-sm font-bold text-[#8690a2]">
-          <ArrowLeft className="h-4 w-4" /> Back to feed
-        </button>
+        <div className="mb-6 flex items-center justify-between gap-3">
+          <button onClick={() => router.push("/student/feed")} className="inline-flex items-center gap-2 text-sm font-bold text-[#8690a2]">
+            <ArrowLeft className="h-4 w-4" /> Back to feed
+          </button>
+          <button onClick={() => void loadApplications()} disabled={loading} className="inline-flex items-center gap-2 rounded-xl border border-[#ab9b8e]/30 px-3 py-2 text-xs font-bold text-[#8690a2] disabled:opacity-50">
+            <RefreshCw className={`h-3.5 w-3.5 ${loading ? "animate-spin" : ""}`} /> Refresh
+          </button>
+        </div>
 
         <div className="mb-7">
           <p className="text-xs font-bold uppercase tracking-[0.2em] text-[#ab9b8e]">Student workspace</p>
-          <h1 className="mt-2 font-playfair text-4xl font-extrabold text-[#8690a2]" style={{ fontFamily: "Playfair Display, Georgia, serif" }}>My Applications</h1>
-          <p className="mt-2 text-sm text-[#5a5a5a]">These records are loaded from the SRM Connect database.</p>
+          <h1 className="mt-2 font-playfair text-4xl font-extrabold text-[#8690a2]">My Applications</h1>
+          <p className="mt-2 text-sm text-[#5a5a5a]">Applications submitted from the feed appear here directly from the database.</p>
         </div>
 
         {error && <div className="mb-5 rounded-xl border border-red-300 bg-red-50 px-4 py-3 text-sm text-red-700">{error}</div>}
@@ -78,7 +85,7 @@ export default function ApplicationsPage() {
         ) : applications.length === 0 ? (
           <div className="rounded-2xl border border-dashed border-[#ab9b8e]/50 bg-[#e0decd]/50 p-10 text-center">
             <h2 className="text-lg font-bold text-[#8690a2]">No applications yet</h2>
-            <p className="mt-2 text-sm text-[#5a5a5a]">Apply to a live faculty project from your feed and it will appear here.</p>
+            <p className="mt-2 text-sm text-[#5a5a5a]">Apply to a faculty project from your feed and it will appear here.</p>
           </div>
         ) : (
           <div className="grid gap-4">
@@ -100,7 +107,7 @@ export default function ApplicationsPage() {
 
                   {application.status === "PENDING" && (
                     <button
-                      onClick={() => withdraw(application.id)}
+                      onClick={() => void withdraw(application.id)}
                       disabled={updatingId === application.id}
                       className="rounded-xl border border-red-300 px-4 py-2 text-xs font-bold text-red-600 transition hover:bg-red-50 disabled:opacity-50"
                     >
