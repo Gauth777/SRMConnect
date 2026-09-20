@@ -21,7 +21,7 @@ import {
   Sparkles,
   Users
 } from "lucide-react";
-import { readFacultyPosts, safeParseJson } from "@/components/faculty/faculty-data";
+import { safeParseJson } from "@/components/faculty/faculty-data";
 import { apiRequest } from "@/lib/api";
 import { getSupabaseBrowserClient } from "@/lib/supabase/client";
 
@@ -200,7 +200,7 @@ export default function FeedClient() {
   const userProfile = useSyncExternalStore(subscribeToStorage, readStudentProfileSnapshot, () => null);
 
   // States
-  const facultyPosts = useSyncExternalStore(subscribeToStorage, readFacultyPostsSnapshot, () => []);
+  const facultyPosts = useSyncExternalStore(subscribeToStorage, readFacultyPostsSnapshot, () => EMPTY_POSTS);
   const [remotePosts, setRemotePosts] = useState<Post[]>([]);
   const [activeTab, setActiveTab] = useState<string>("All");
   const [savedPostIds, setSavedPostIds] = useState<number[]>([]);
@@ -1434,25 +1434,41 @@ function subscribeToStorage(callback: () => void) {
   return () => window.removeEventListener("storage", callback);
 }
 
+const EMPTY_POSTS: Post[] = [];
+
+let cachedStudentProfileRaw: string | null | undefined;
+let cachedStudentProfile: CampusConnectUser | null = null;
+let cachedFacultyPostsRaw: string | null | undefined;
+let cachedFacultyPosts: Post[] = EMPTY_POSTS;
+
 function readStudentProfileSnapshot() {
   if (typeof window === "undefined") {
     return null;
   }
 
-  const data = window.localStorage.getItem("campusconnect_user");
-  if (!data) {
-    return null;
+  const raw = window.localStorage.getItem("campusconnect_user");
+  if (raw === cachedStudentProfileRaw) {
+    return cachedStudentProfile;
   }
 
-  return safeParseJson<CampusConnectUser | null>(data, null);
+  cachedStudentProfileRaw = raw;
+  cachedStudentProfile = safeParseJson<CampusConnectUser | null>(raw, null);
+  return cachedStudentProfile;
 }
 
 function readFacultyPostsSnapshot() {
   if (typeof window === "undefined") {
-    return [] as Post[];
+    return EMPTY_POSTS;
   }
 
-  return readFacultyPosts() as Post[];
+  const raw = window.localStorage.getItem("campusconnect_posts");
+  if (raw === cachedFacultyPostsRaw) {
+    return cachedFacultyPosts;
+  }
+
+  cachedFacultyPostsRaw = raw;
+  cachedFacultyPosts = safeParseJson<Post[]>(raw, EMPTY_POSTS);
+  return cachedFacultyPosts;
 }
 
 function getBaseRemaining(id: number) {
