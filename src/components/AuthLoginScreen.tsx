@@ -151,11 +151,34 @@ export function AuthLoginScreen({ role, onBack }: AuthLoginScreenProps) {
         setError("Enter the admin email and password.");
         return;
       }
-      localStorage.setItem(
-        "campusconnect_user",
-        JSON.stringify({ role: "admin", loggedIn: true, name: "Admin", email: form.email }),
-      );
-      router.push("/admin/dashboard");
+
+      setLoading(true);
+      try {
+        const response = await fetch("/api/admin/login", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ email: form.email, password: form.password }),
+        });
+        const payload = (await response.json()) as { message?: string; email?: string };
+        if (!response.ok) {
+          throw new Error(payload.message || "Invalid admin credentials.");
+        }
+
+        localStorage.setItem(
+          "campusconnect_user",
+          JSON.stringify({
+            role: "admin",
+            loggedIn: true,
+            name: "Admin",
+            email: payload.email || form.email,
+          }),
+        );
+        router.push("/admin/dashboard");
+      } catch (adminError) {
+        setError(adminError instanceof Error ? adminError.message : "Admin login failed.");
+      } finally {
+        setLoading(false);
+      }
       return;
     }
 
@@ -228,7 +251,7 @@ export function AuthLoginScreen({ role, onBack }: AuthLoginScreenProps) {
           </h2>
           <p className="mt-2 text-sm text-sunset-peach/60">
             {role === "admin"
-              ? "Admin authentication remains in prototype mode during this integration phase."
+              ? "Admin access is restricted to the configured SRM Connect administrator account."
               : mode === "signin"
                 ? "Sign in with your institutional account."
                 : "Create your Supabase-backed institutional account."}
@@ -274,7 +297,7 @@ export function AuthLoginScreen({ role, onBack }: AuthLoginScreenProps) {
                 type="email"
                 value={form.email}
                 onChange={(event) => setField("email", event.target.value.trim())}
-                placeholder="yourname@srmist.edu.in"
+                placeholder={role === "admin" ? "Admin email" : "yourname@srmist.edu.in"}
                 required
               />
             </Field>
