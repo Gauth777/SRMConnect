@@ -17,12 +17,25 @@ async function bootstrap() {
     configService.get<string>('FRONTEND_URL') ||
     'http://localhost:3000';
 
+  const allowedOrigins = frontendUrl
+    .split(',')
+    .map((origin) => origin.trim())
+    .filter(Boolean);
+
   // Apply Helmet for security headers
   app.use(helmet());
 
-  // Configure CORS - do not use wildcard with credentials
+  // Configure CORS for local development plus deployed frontend origins.
   app.enableCors({
-    origin: frontendUrl,
+    origin: (origin, callback) => {
+      // Allow server-to-server requests and tools that do not send an Origin header.
+      if (!origin || allowedOrigins.includes(origin)) {
+        callback(null, true);
+        return;
+      }
+
+      callback(new Error(`Origin not allowed by CORS: ${origin}`), false);
+    },
     credentials: true,
     methods: ['GET', 'POST', 'PUT', 'DELETE', 'PATCH', 'OPTIONS'],
     allowedHeaders: ['Content-Type', 'Authorization', 'Accept'],
@@ -61,7 +74,7 @@ async function bootstrap() {
   logger.log(`====================================================`);
   logger.log(` Local API Server: http://localhost:${port}/api/v1`);
   logger.log(` Swagger Docs:     http://localhost:${port}/docs`);
-  logger.log(` Allowed CORS:     ${frontendUrl}`);
+  logger.log(` Allowed CORS:     ${allowedOrigins.join(', ')}`);
   logger.log(`====================================================`);
 }
 bootstrap();
