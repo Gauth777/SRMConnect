@@ -130,6 +130,7 @@ model Student {
   updatedAt      DateTime      @updatedAt @map("updated_at")
   profile        Profile       @relation(fields: [id], references: [id], onDelete: Cascade)
   applications   Application[]
+  savedProjects  SavedProject[]
 
   @@map("students")
 }
@@ -175,6 +176,7 @@ model Project {
   updatedAt              DateTime        @updatedAt @map("updated_at")
   faculty                Faculty         @relation(fields: [facultyId], references: [id], onDelete: Cascade)
   applications           Application[]
+  savedBy                SavedProject[]
 
   @@index([facultyId])
   @@index([status, deadline])
@@ -199,4 +201,17 @@ model Application {
   @@index([projectId, status])
   @@index([studentId, status])
   @@map("applications")
+}
+
+
+model SavedProject {
+  studentId String   @db.Uuid @map("student_id")
+  projectId String   @db.Uuid @map("project_id")
+  createdAt DateTime @default(now()) @map("created_at")
+  student   Student  @relation(fields: [studentId], references: [id], onDelete: Cascade)
+  project   Project  @relation(fields: [projectId], references: [id], onDelete: Cascade)
+
+  @@id([studentId, projectId])
+  @@index([projectId])
+  @@map("saved_projects")
 }
