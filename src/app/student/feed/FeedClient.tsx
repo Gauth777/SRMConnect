@@ -1,67 +1,36 @@
 "use client";
 
-import React, { useEffect, useMemo, useState, useRef, useSyncExternalStore } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
-import { motion, AnimatePresence } from "framer-motion";
 import {
-  Home,
-  Search as SearchIcon,
-  FileText,
-  User,
-  GraduationCap,
-  Trophy,
   Bookmark,
-  Mail,
-  Bell,
+  BookmarkCheck,
+  BriefcaseBusiness,
+  CalendarDays,
+  FileText,
+  GraduationCap,
   LogOut,
-  Settings,
-  X,
-  CheckCircle,
-  MoreHorizontal,
-  Sparkles,
-  Users
+  RefreshCw,
+  Search,
+  User,
+  Users,
 } from "lucide-react";
-import { safeParseJson } from "@/components/faculty/faculty-data";
 import { apiRequest } from "@/lib/api";
 import { getSupabaseBrowserClient } from "@/lib/supabase/client";
 
-// Types
-interface Post {
-  id: number;
-  backendId?: string;
-  type: "project" | "hackathon" | "achievement" | "research";
-  faculty?: string;
-  dept?: string;
-  time: string;
-  title: string;
-  description?: string;
-  skills?: string[];
-  domain?: string;
-  duration?: string;
-  slots?: number;
-  remaining?: number;
-  deadline?: string;
-  compatibility?: number;
-  rolesNeeded?: string;
-  teamSlots?: string;
-  studentName?: string;
-  verifiedBy?: string;
-  reactions?: number;
-  designation?: string;
-}
-
-interface CampusConnectUser {
-  role: string;
-  profileComplete: boolean;
-  loggedIn: boolean;
-  fullName?: string;
-  department?: string;
-  currentYear?: string;
-}
-
-interface RemoteProject {
+interface StudentProfile {
   id: string;
-  postType: string;
+  email: string;
+  fullName?: string | null;
+  role: "STUDENT" | "FACULTY" | "ADMIN";
+  student?: {
+    registrationNo: string;
+  } | null;
+}
+
+interface FeedProject {
+  id: string;
+  postType: "PROJECT" | "HACKATHON" | "RESEARCH" | "INHOUSE" | "GUEST_LECTURE" | "WORKSHOP";
   title: string;
   domain: string;
   description: string;
@@ -80,1444 +49,365 @@ interface RemoteProject {
   _count: { applications: number };
 }
 
-interface RemoteApplication {
+interface ApplicationRecord {
   projectId: string;
 }
 
-// Mock Data is kept only as an empty-database preview. Once real projects exist,
-// the feed switches completely to API-backed records.
-const MOCK_POSTS: Post[] = [
-  {
-    id: 1,
-    type: "project",
-    faculty: "Dr. Godfrey",
-    dept: "CSE",
-    time: "2h ago",
-    title: "AI-based Traffic Optimization System",
-    description: "Using deep reinforcement learning to optimize urban traffic flow in real-time.",
-    skills: ["Python", "TensorFlow", "OpenCV"],
-    domain: "AI & ML",
-    duration: "3 months",
-    slots: 4,
-    remaining: 2,
-    deadline: "July 15, 2025",
-    compatibility: 87
-  },
-  {
-    id: 2,
-    type: "project",
-    faculty: "Dr. Baskar M.",
-    dept: "CSE",
-    time: "5h ago",
-    title: "Blockchain Certificate Verification",
-    description: "Building a tamper-proof certificate issuance and verification system using Ethereum smart contracts.",
-    skills: ["Node.js", "Solidity", "React"],
-    domain: "Blockchain",
-    duration: "4 months",
-    slots: 3,
-    remaining: 1,
-    deadline: "August 1, 2025",
-    compatibility: 91
-  },
-  {
-    id: 3,
-    type: "project",
-    faculty: "Dr. Priya R.",
-    dept: "ECE",
-    time: "1d ago",
-    title: "Federated Learning for Healthcare",
-    description: "Developing privacy-preserving collaborative ML models to analyze distributed medical imaging data.",
-    skills: ["Python", "PyTorch", "Privacy"],
-    domain: "Healthcare Tech",
-    duration: "6 months",
-    slots: 2,
-    remaining: 2,
-    deadline: "July 20, 2025",
-    compatibility: 78
-  },
-  {
-    id: 4,
-    type: "hackathon",
-    faculty: "IEEE SRM",
-    dept: "SRM Student Chapter",
-    time: "1d ago",
-    title: "Smart India Hackathon 2025",
-    description: "National level 36-hour hackathon focusing on digital solutions for product development, cybersecurity, and robotics.",
-    rolesNeeded: "Backend Dev, ML Engineer, UI Designer",
-    teamSlots: "3/6 members joined",
-    deadline: "June 30, 2025",
-    compatibility: 93
-  },
-  {
-    id: 5,
-    type: "hackathon",
-    faculty: "Google DSC",
-    dept: "Developer Student Club",
-    time: "2d ago",
-    title: "Solution Challenge 2025",
-    description: "Develop a solution for one or more of the UN Sustainable Development Goals using Google technology.",
-    rolesNeeded: "Frontend Dev, DevOps, Full Stack",
-    teamSlots: "2/4 members joined",
-    deadline: "July 10, 2025",
-    compatibility: 85
-  },
-  {
-    id: 6,
-    type: "achievement",
-    studentName: "Rahul Sharma",
-    time: "3h ago",
-    title: "Cleared AWS Cloud Practitioner Certification",
-    verifiedBy: "Verified by Dr. Baskar M.",
-    reactions: 14
-  },
-  {
-    id: 7,
-    type: "achievement",
-    studentName: "Ananya Krishnan",
-    time: "12h ago",
-    title: "Won 1st Place at CodeStorm 2025",
-    verifiedBy: "Verified by Admin",
-    reactions: 32
-  },
-  {
-    id: 8,
-    type: "research",
-    faculty: "Dr. Godfrey",
-    designation: "Professor & Head of Research",
-    dept: "CSE Dept",
-    time: "4h ago",
-    title: "NLP & Computer Vision Research Assistant",
-    description: "Looking for research assistants to collaborate on high-impact publications focusing on multimodal models.",
-    domain: "NLP & CV",
-    compatibility: 91
-  }
-];
+interface SavedProjectRecord {
+  projectId: string;
+}
+
+const TABS = ["All", "Projects", "Hackathons", "Research"] as const;
 
 export default function FeedClient() {
   const router = useRouter();
-
-  // Authentication & Profile Setup Guard
-  const userProfile = useSyncExternalStore(subscribeToStorage, readStudentProfileSnapshot, () => null);
-
-  // States
-  const facultyPosts = useSyncExternalStore(subscribeToStorage, readFacultyPostsSnapshot, () => EMPTY_POSTS);
-  const [remotePosts, setRemotePosts] = useState<Post[]>([]);
-  const [activeTab, setActiveTab] = useState<string>("All");
-  const [savedPostIds, setSavedPostIds] = useState<number[]>([]);
-  const [appliedPostIds, setAppliedPostIds] = useState<number[]>([]);
-  const [reactedPostIds, setReactedPostIds] = useState<number[]>([]);
-  const [remainingByPostId, setRemainingByPostId] = useState<Record<number, number>>({});
-  const [reactionByPostId, setReactionByPostId] = useState<Record<number, number>>({});
-  
-  // Interactive Nav UI States
-  const [isSearchFocused, setIsSearchFocused] = useState(false);
-  const [showNotifications, setShowNotifications] = useState(false);
-  const [showProfileMenu, setShowProfileMenu] = useState(false);
+  const [profile, setProfile] = useState<StudentProfile | null>(null);
+  const [projects, setProjects] = useState<FeedProject[]>([]);
+  const [appliedProjectIds, setAppliedProjectIds] = useState<string[]>([]);
+  const [savedProjectIds, setSavedProjectIds] = useState<string[]>([]);
+  const [activeTab, setActiveTab] = useState<(typeof TABS)[number]>("All");
   const [searchQuery, setSearchQuery] = useState("");
-  const [toastMessage, setToastMessage] = useState<string | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [refreshing, setRefreshing] = useState(false);
+  const [workingProjectId, setWorkingProjectId] = useState<string | null>(null);
+  const [error, setError] = useState("");
+  const [toast, setToast] = useState("");
 
-  // Mobile Bottom Sheet Navigation
-  const [showMobileMore, setShowMobileMore] = useState(false);
-
-  // Refs for closing dropdowns when clicking outside
-  const searchRef = useRef<HTMLDivElement>(null);
-  const notificationRef = useRef<HTMLDivElement>(null);
-  const profileMenuRef = useRef<HTMLDivElement>(null);
-
-  useEffect(() => {
-    if (!userProfile) {
-      router.push("/login/student");
-      return;
-    }
-
-    if (!userProfile.loggedIn) {
-      router.push("/login/student");
-      return;
-    }
-
-    if (userProfile.profileComplete === false) {
-      router.push("/student/setup");
-    }
-  }, [router, userProfile]);
-
-  useEffect(() => {
-    if (!userProfile?.loggedIn || userProfile.profileComplete === false) return;
-
-    let cancelled = false;
-    const loadFeed = async () => {
-      try {
-        const [projects, applications] = await Promise.all([
-          apiRequest<RemoteProject[]>("/projects"),
-          apiRequest<RemoteApplication[]>("/applications/me"),
-        ]);
-        if (cancelled) return;
-        setRemotePosts(projects.map(mapRemoteProject));
-        setAppliedPostIds(applications.map((application) => uiIdFromUuid(application.projectId)));
-      } catch (error) {
-        if (!cancelled) {
-          triggerToast(error instanceof Error ? error.message : "Could not load the live project feed.");
-        }
-      }
-    };
-
-    void loadFeed();
-    return () => { cancelled = true; };
-  }, [userProfile]);
-
-  // Click outside listener for dropdowns
-  useEffect(() => {
-    function handleClickOutside(event: MouseEvent) {
-      if (searchRef.current && !searchRef.current.contains(event.target as Node)) {
-        setIsSearchFocused(false);
-      }
-      if (notificationRef.current && !notificationRef.current.contains(event.target as Node)) {
-        setShowNotifications(false);
-      }
-      if (profileMenuRef.current && !profileMenuRef.current.contains(event.target as Node)) {
-        setShowProfileMenu(false);
-      }
-    }
-    document.addEventListener("mousedown", handleClickOutside);
-    return () => {
-      document.removeEventListener("mousedown", handleClickOutside);
-    };
-  }, []);
-
-  // Show a temporary success toast
-  const triggerToast = (msg: string) => {
-    setToastMessage(msg);
-    setTimeout(() => {
-      setToastMessage(null);
-    }, 3000);
-  };
-
-  const handleLogout = async () => {
-    await getSupabaseBrowserClient().auth.signOut({ scope: "local" });
-    localStorage.removeItem("campusconnect_user");
-    router.push("/");
-  };
-
-  // Toggle Save
-  const toggleSave = (id: number) => {
-    setSavedPostIds((prev) => {
-      const exists = prev.includes(id);
-      if (exists) {
-        triggerToast("Project removed from saved list");
-        return prev.filter((pid) => pid !== id);
-      } else {
-        triggerToast("Project saved successfully!");
-        return [...prev, id];
-      }
-    });
-  };
-
-  // Toggle Apply/Join
-  const toggleApply = async (post: Post, type: string) => {
-    if (appliedPostIds.includes(post.id)) return;
+  const loadFeed = useCallback(async (quiet = false) => {
+    if (!quiet) setLoading(true);
+    setError("");
 
     try {
-      if (post.backendId) {
-        await apiRequest(`/applications/projects/${post.backendId}`, {
-          method: "POST",
-          body: JSON.stringify({}),
-        });
+      const supabase = getSupabaseBrowserClient();
+      const { data: userData, error: userError } = await supabase.auth.getUser();
+      if (userError || !userData.user) {
+        router.replace("/login/student");
+        return;
       }
 
-      setAppliedPostIds((prev) => [...prev, post.id]);
-      setRemainingByPostId((current) => {
-        const nextRemaining = current[post.id] ?? post.remaining ?? getBaseRemaining(post.id);
-        if (nextRemaining <= 0) return current;
-        return { ...current, [post.id]: nextRemaining - 1 };
+      const [profileRecord, projectRecords, applications, savedProjects] = await Promise.all([
+        apiRequest<StudentProfile>("/profiles/me"),
+        apiRequest<FeedProject[]>("/projects"),
+        apiRequest<ApplicationRecord[]>("/applications/me"),
+        apiRequest<SavedProjectRecord[]>("/saved-projects/me"),
+      ]);
+
+      if (profileRecord.role !== "STUDENT") {
+        throw new Error("This account is not registered as a student.");
+      }
+
+      setProfile(profileRecord);
+      setProjects(projectRecords);
+      setAppliedProjectIds(applications.map((application) => application.projectId));
+      setSavedProjectIds(savedProjects.map((saved) => saved.projectId));
+    } catch (requestError) {
+      setError(requestError instanceof Error ? requestError.message : "Could not load the student feed.");
+    } finally {
+      setLoading(false);
+      setRefreshing(false);
+    }
+  }, [router]);
+
+  useEffect(() => {
+    void loadFeed();
+  }, [loadFeed]);
+
+  const filteredProjects = useMemo(() => {
+    const query = searchQuery.trim().toLowerCase();
+
+    return projects.filter((project) => {
+      const matchesTab =
+        activeTab === "All" ||
+        (activeTab === "Projects" && ["PROJECT", "INHOUSE", "WORKSHOP", "GUEST_LECTURE"].includes(project.postType)) ||
+        (activeTab === "Hackathons" && project.postType === "HACKATHON") ||
+        (activeTab === "Research" && project.postType === "RESEARCH");
+
+      if (!matchesTab) return false;
+      if (!query) return true;
+
+      return [
+        project.title,
+        project.domain,
+        project.description,
+        project.faculty.profile.fullName || "",
+        project.faculty.department || "",
+        ...project.skills,
+      ].some((value) => value.toLowerCase().includes(query));
+    });
+  }, [activeTab, projects, searchQuery]);
+
+  const showToast = (message: string) => {
+    setToast(message);
+    window.setTimeout(() => setToast(""), 2600);
+  };
+
+  const applyToProject = async (project: FeedProject) => {
+    if (appliedProjectIds.includes(project.id)) return;
+
+    setWorkingProjectId(project.id);
+    setError("");
+    try {
+      await apiRequest(`/applications/projects/${project.id}`, {
+        method: "POST",
+        body: JSON.stringify({}),
       });
 
-      const actionText = type === "hackathon" ? "Joined team successfully!" : "Application submitted successfully!";
-      triggerToast(actionText);
-    } catch (error) {
-      triggerToast(error instanceof Error ? error.message : "Could not submit your application.");
+      setAppliedProjectIds((current) => [...current, project.id]);
+      setProjects((current) =>
+        current.map((item) =>
+          item.id === project.id
+            ? { ...item, _count: { applications: item._count.applications + 1 } }
+            : item,
+        ),
+      );
+      showToast("Application submitted. It is now available in My Applications.");
+    } catch (requestError) {
+      setError(requestError instanceof Error ? requestError.message : "Could not submit application.");
+    } finally {
+      setWorkingProjectId(null);
     }
   };
 
-  // Toggle Reaction on Achievement
-  const handleReact = (id: number) => {
-    const isReacted = reactedPostIds.includes(id);
-    if (isReacted) {
-      setReactedPostIds((prev) => prev.filter((rid) => rid !== id));
-      setReactionByPostId((current) => ({
-        ...current,
-        [id]: Math.max(0, (current[id] ?? getBaseReactions(id)) - 1),
-      }));
-    } else {
-      setReactedPostIds((prev) => [...prev, id]);
-      setReactionByPostId((current) => ({
-        ...current,
-        [id]: (current[id] ?? getBaseReactions(id)) + 1,
-      }));
+  const toggleSaved = async (project: FeedProject) => {
+    const isSaved = savedProjectIds.includes(project.id);
+    setWorkingProjectId(project.id);
+    setError("");
+
+    try {
+      await apiRequest(`/saved-projects/${project.id}`, {
+        method: isSaved ? "DELETE" : "POST",
+      });
+
+      setSavedProjectIds((current) =>
+        isSaved ? current.filter((id) => id !== project.id) : [...current, project.id],
+      );
+      showToast(isSaved ? "Removed from Saved Projects." : "Saved project.");
+    } catch (requestError) {
+      setError(requestError instanceof Error ? requestError.message : "Could not update saved project.");
+    } finally {
+      setWorkingProjectId(null);
     }
   };
 
-  const posts = useMemo(() => {
-    const facultyFeedPosts = remotePosts.length > 0 ? remotePosts : [...facultyPosts, ...MOCK_POSTS];
-    return facultyFeedPosts.map((post) => {
-      const remaining = remainingByPostId[post.id];
-      const reactions = reactionByPostId[post.id];
-      return {
-        ...post,
-        remaining: remaining !== undefined ? remaining : post.remaining,
-        reactions: reactions !== undefined ? reactions : post.reactions,
-      };
-    });
-  }, [facultyPosts, remotePosts, remainingByPostId, reactionByPostId]);
+  const logout = async () => {
+    await getSupabaseBrowserClient().auth.signOut({ scope: "local" });
+    localStorage.removeItem("campusconnect_user");
+    router.replace("/");
+  };
 
-  // Filter logic
-  const filteredPosts = posts.filter((post) => {
-    if (activeTab === "All") return true;
-    if (activeTab === "Projects") return post.type === "project";
-    if (activeTab === "Hackathons") return post.type === "hackathon";
-    if (activeTab === "Research") return post.type === "research";
-    if (activeTab === "Achievements") return post.type === "achievement";
-    return true;
-  }).filter((post) => {
-    if (!searchQuery) return true;
-    const query = searchQuery.toLowerCase();
-    const titleMatch = post.title.toLowerCase().includes(query);
-    const descMatch = post.description?.toLowerCase().includes(query) || false;
-    const facultyMatch = post.faculty?.toLowerCase().includes(query) || false;
-    const skillMatch = post.skills?.some((s) => s.toLowerCase().includes(query)) || false;
-    const authorMatch = post.studentName?.toLowerCase().includes(query) || false;
-    return titleMatch || descMatch || facultyMatch || skillMatch || authorMatch;
-  });
-
-  if (!userProfile) {
+  if (loading) {
     return (
-      <div className="w-full min-h-screen bg-[#f5f3ec] flex flex-col items-center justify-center">
-        <div className="flex flex-col items-center gap-4">
-          <div className="w-10 h-10 rounded-full border-4 border-[#8690a2] border-t-transparent animate-spin" />
-          <p className="text-sm font-semibold tracking-wider text-[#8690a2] font-inter">Securing feed connection...</p>
+      <main className="flex min-h-screen items-center justify-center bg-[#f5f3ec] text-[#8690a2]">
+        <div className="text-center">
+          <RefreshCw className="mx-auto h-8 w-8 animate-spin" />
+          <p className="mt-3 text-sm font-semibold">Loading your SRM Connect feed…</p>
         </div>
-      </div>
+      </main>
     );
   }
 
-  // Get Initials helper
-  const getInitials = (name: string) => {
-    return name
-      .split(" ")
-      .map((n) => n[0])
-      .join("")
-      .toUpperCase()
-      .substring(0, 2);
-  };
-
-  const currentUserName = userProfile?.fullName || "John Doe";
-  const currentUserDept = userProfile?.department || "CSE";
-  const currentUserYear = userProfile?.currentYear || "3rd Year";
-
   return (
-    <motion.div
-      initial={{ opacity: 0, y: 15 }}
-      animate={{ opacity: 1, y: 0 }}
-      transition={{ duration: 0.4 }}
-      className="min-h-screen w-full bg-[#f5f3ec] text-[#3a3a3a] select-none flex flex-col relative"
-      style={{ fontFamily: "'Inter', sans-serif" }}
-    >
-      {/* Toast Notification */}
-      <AnimatePresence>
-        {toastMessage && (
-          <motion.div
-            initial={{ opacity: 0, y: 50, scale: 0.9 }}
-            animate={{ opacity: 1, y: 0, scale: 1 }}
-            exit={{ opacity: 0, y: 20, scale: 0.9 }}
-            className="fixed bottom-20 left-1/2 -translate-x-1/2 z-50 bg-[#8690a2] text-white px-5 py-3 rounded-xl shadow-lg border border-[#bdd1d3]/40 flex items-center gap-2 font-semibold text-sm max-w-sm text-center"
-          >
-            <CheckCircle className="w-4 h-4 text-[#bdd1d3]" />
-            <span>{toastMessage}</span>
-          </motion.div>
-        )}
-      </AnimatePresence>
-
-      {/* NAVBAR */}
-      <header className="fixed top-0 left-0 right-0 h-[56px] bg-[#e0decd] border-b border-[#ab9b8e]/30 z-50 px-4 md:px-6 flex items-center justify-between">
-        {/* Left Section: Logo */}
-        <div className="flex items-center gap-2 cursor-pointer" onClick={() => router.push("/student/feed")}>
-          <span 
-            className="text-xl md:text-2xl font-extrabold text-[#8690a2] tracking-tight"
-            style={{ fontFamily: "'Playfair Display', Georgia, serif" }}
-          >
+    <div className="min-h-screen bg-[#f5f3ec] text-[#3a3a3a]">
+      <header className="sticky top-0 z-40 border-b border-[#ab9b8e]/25 bg-[#e0decd]/95 backdrop-blur">
+        <div className="mx-auto flex max-w-7xl items-center justify-between gap-4 px-4 py-3 md:px-6">
+          <button onClick={() => router.push("/student/feed")} className="font-playfair text-2xl font-extrabold text-[#8690a2]">
             CampusConnect
-          </span>
-        </div>
-
-        {/* Center Section: Search Bar */}
-        <div className="relative hidden md:block" ref={searchRef}>
-          <div className="relative w-[320px]">
-            <input
-              type="text"
-              placeholder="Search projects, faculty, skills..."
-              value={searchQuery}
-              onChange={(e) => setSearchQuery(e.target.value)}
-              onFocus={() => setIsSearchFocused(true)}
-              className="w-full h-9 pl-9 pr-4 rounded-full bg-[#f5f3ec] border border-[#bdd1d3] text-sm text-[#3a3a3a] placeholder-[#ab9b8e] focus:outline-none focus:border-[#8690a2] transition-colors"
-            />
-            <SearchIcon className="w-4 h-4 text-[#ab9b8e] absolute left-3 top-1/2 -translate-y-1/2" />
-            
-            {searchQuery && (
-              <button 
-                onClick={() => setSearchQuery("")} 
-                className="absolute right-3 top-1/2 -translate-y-1/2 text-[#ab9b8e] hover:text-[#3a3a3a]"
-              >
-                <X className="w-3.5 h-3.5" />
-              </button>
-            )}
-          </div>
-
-          {/* Search Dropdown Panel */}
-          <AnimatePresence>
-            {isSearchFocused && (
-              <motion.div
-                initial={{ opacity: 0, y: -8 }}
-                animate={{ opacity: 1, y: 0 }}
-                exit={{ opacity: 0, y: -8 }}
-                transition={{ duration: 0.15 }}
-                className="absolute top-[44px] left-0 w-[320px] bg-[#e0decd] rounded-2xl border border-[#ab9b8e]/40 shadow-xl p-4 z-50 flex flex-col gap-4 text-xs"
-              >
-                <div>
-                  <span className="font-bold text-[#8690a2] block mb-2 uppercase tracking-wider text-[10px]">Recommended for you</span>
-                  <div className="flex flex-wrap gap-1.5">
-                    {["AI & ML", "Blockchain", "Healthcare NLP"].map((tag) => (
-                      <button
-                        key={tag}
-                        onClick={() => { setSearchQuery(tag); setIsSearchFocused(false); }}
-                        className="px-2.5 py-1 rounded-full bg-[#f5f3ec] hover:bg-[#bdd1d3]/40 border border-[#bdd1d3] text-[#5a5a5a] cursor-pointer transition-colors"
-                      >
-                        {tag}
-                      </button>
-                    ))}
-                  </div>
-                </div>
-
-                <div>
-                  <span className="font-bold text-[#8690a2] block mb-2 uppercase tracking-wider text-[10px]">Based on your skills</span>
-                  <div className="flex flex-wrap gap-1.5">
-                    {["React Web", "PyTorch Training", "Node.js API"].map((tag) => (
-                      <button
-                        key={tag}
-                        onClick={() => { setSearchQuery(tag); setIsSearchFocused(false); }}
-                        className="px-2.5 py-1 rounded-full bg-[#f5f3ec] hover:bg-[#bdd1d3]/40 border border-[#bdd1d3] text-[#5a5a5a] cursor-pointer transition-colors"
-                      >
-                        {tag}
-                      </button>
-                    ))}
-                  </div>
-                </div>
-
-                <div>
-                  <span className="font-bold text-[#8690a2] block mb-2 uppercase tracking-wider text-[10px]">Recently posted</span>
-                  <div className="flex flex-col gap-1.5">
-                    {[
-                      { title: "Smart India Hackathon 2025", type: "Hackathon" },
-                      { title: "AI-based Traffic Optimization", type: "Project" }
-                    ].map((item, idx) => (
-                      <div
-                        key={idx}
-                        onClick={() => { setSearchQuery(item.title); setIsSearchFocused(false); }}
-                        className="p-2 rounded-lg bg-[#f5f3ec] hover:bg-[#bdd1d3]/20 cursor-pointer flex items-center justify-between transition-colors border border-transparent hover:border-[#bdd1d3]"
-                      >
-                        <span className="font-semibold text-[#3a3a3a] truncate">{item.title}</span>
-                        <span className="text-[9px] px-1.5 py-0.5 rounded bg-[#8690a2]/15 text-[#8690a2] font-bold">{item.type}</span>
-                      </div>
-                    ))}
-                  </div>
-                </div>
-              </motion.div>
-            )}
-          </AnimatePresence>
-        </div>
-
-        {/* Right Section: Icons & Profile */}
-        <div className="flex items-center gap-3">
-          {/* Notifications bell */}
-          <div className="relative" ref={notificationRef}>
-            <button
-              onClick={() => setShowNotifications(!showNotifications)}
-              className="p-1.5 rounded-full hover:bg-[#bdd1d3]/30 transition-colors text-[#8690a2] cursor-pointer relative"
-            >
-              <Bell className="w-5 h-5" />
-              <span className="absolute top-1.5 right-1.5 w-2 h-2 bg-[#d2c296] rounded-full animate-pulse" />
-            </button>
-
-            {/* Notification Dropdown */}
-            <AnimatePresence>
-              {showNotifications && (
-                <motion.div
-                  initial={{ opacity: 0, y: -10 }}
-                  animate={{ opacity: 1, y: 0 }}
-                  exit={{ opacity: 0, y: -10 }}
-                  transition={{ duration: 0.2 }}
-                  className="absolute right-0 top-[40px] w-72 bg-[#e0decd] rounded-2xl border border-[#ab9b8e]/40 shadow-xl z-50 py-2 text-xs"
-                >
-                  <div className="px-4 py-2 border-b border-[#ab9b8e]/20 flex justify-between items-center">
-                    <span className="font-bold text-[#8690a2] uppercase tracking-wider text-[10px]">Notifications</span>
-                    <button className="text-[10px] text-[#d2c296] hover:underline">Mark read</button>
-                  </div>
-                  <div className="flex flex-col max-h-[300px] overflow-y-auto">
-                    {[
-                      { text: "Dr. Godfrey approved your application for Traffic Optimization.", time: "1h ago", unread: true },
-                      { text: "Priya Sharma invited you to join team for Smart India Hackathon.", time: "3h ago", unread: true },
-                      { text: "Dr. Baskar M. verified your achievement 'AWS Practitioner'.", time: "1d ago", unread: false }
-                    ].map((n, idx) => (
-                      <div
-                        key={idx}
-                        className={`p-3 border-b border-[#ab9b8e]/10 flex flex-col gap-1 hover:bg-[#bdd1d3]/15 transition-colors cursor-pointer ${n.unread ? "bg-[#bdd1d3]/10" : ""}`}
-                      >
-                        <p className="text-[#3a3a3a] leading-tight">{n.text}</p>
-                        <span className="text-[9px] text-[#ab9b8e] font-medium">{n.time}</span>
-                      </div>
-                    ))}
-                  </div>
-                </motion.div>
-              )}
-            </AnimatePresence>
-          </div>
-
-          {/* Invitations mail icon */}
-          <button
-            onClick={() => router.push("/student/invitations")}
-            className="p-1.5 rounded-full hover:bg-[#bdd1d3]/30 transition-colors text-[#8690a2] cursor-pointer relative"
-          >
-            <Mail className="w-5 h-5" />
-            <span className="absolute -top-0.5 -right-0.5 bg-[#d2c296] text-[#3a3a3a] font-bold text-[9px] w-4 h-4 rounded-full flex items-center justify-center">
-              2
-            </span>
           </button>
 
-          {/* Profile Avatar circle */}
-          <div className="relative" ref={profileMenuRef}>
+          <div className="hidden max-w-xl flex-1 md:block">
+            <div className="relative">
+              <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-[#ab9b8e]" />
+              <input
+                value={searchQuery}
+                onChange={(event) => setSearchQuery(event.target.value)}
+                placeholder="Search faculty projects, domains or skills"
+                className="w-full rounded-full border border-[#bdd1d3] bg-[#f5f3ec] py-2 pl-10 pr-4 text-sm outline-none focus:border-[#8690a2]"
+              />
+            </div>
+          </div>
+
+          <div className="flex items-center gap-2">
             <button
-              onClick={() => setShowProfileMenu(!showProfileMenu)}
-              className="w-8 h-8 rounded-full bg-[#8690a2] text-white flex items-center justify-center font-bold text-sm border border-[#bdd1d3] shadow-sm hover:scale-105 transition-transform cursor-pointer"
+              onClick={() => {
+                setRefreshing(true);
+                void loadFeed(true);
+              }}
+              disabled={refreshing}
+              className="rounded-xl border border-[#ab9b8e]/30 p-2 text-[#8690a2] hover:bg-white/50 disabled:opacity-50"
+              title="Refresh feed"
             >
-              JS
+              <RefreshCw className={`h-4 w-4 ${refreshing ? "animate-spin" : ""}`} />
             </button>
-
-            {/* Profile Dropdown */}
-            <AnimatePresence>
-              {showProfileMenu && (
-                <motion.div
-                  initial={{ opacity: 0, y: -10 }}
-                  animate={{ opacity: 1, y: 0 }}
-                  exit={{ opacity: 0, y: -10 }}
-                  transition={{ duration: 0.15 }}
-                  className="absolute right-0 top-[40px] w-48 bg-[#e0decd] rounded-xl border border-[#ab9b8e]/40 shadow-xl z-50 py-1.5 text-xs text-[#5a5a5a]"
-                >
-                  <div className="px-4 py-2 border-b border-[#ab9b8e]/20 flex flex-col gap-0.5">
-                    <span className="font-bold text-[#3a3a3a]">{currentUserName}</span>
-                    <span className="text-[10px] text-[#ab9b8e]">{currentUserDept} · {currentUserYear}</span>
-                  </div>
-                  
-                  <button
-                    onClick={() => { router.push("/student/profile"); setShowProfileMenu(false); }}
-                    className="w-full text-left px-4 py-2 hover:bg-[#bdd1d3]/30 hover:text-[#3a3a3a] flex items-center gap-2 cursor-pointer transition-colors"
-                  >
-                    <User className="w-3.5 h-3.5" />
-                    <span>My Profile</span>
-                  </button>
-
-                  <button
-                    onClick={() => { router.push("/student/setup"); setShowProfileMenu(false); }}
-                    className="w-full text-left px-4 py-2 hover:bg-[#bdd1d3]/30 hover:text-[#3a3a3a] flex items-center gap-2 cursor-pointer transition-colors"
-                  >
-                    <Settings className="w-3.5 h-3.5" />
-                    <span>Settings</span>
-                  </button>
-
-                  <div className="border-t border-[#ab9b8e]/20 my-1" />
-
-                  <button
-                    onClick={handleLogout}
-                    className="w-full text-left px-4 py-2 hover:bg-red-500/10 text-red-600 hover:text-red-700 font-semibold flex items-center gap-2 cursor-pointer transition-colors"
-                  >
-                    <LogOut className="w-3.5 h-3.5" />
-                    <span>Logout</span>
-                  </button>
-                </motion.div>
-              )}
-            </AnimatePresence>
+            <button
+              onClick={() => router.push("/student/profile")}
+              className="hidden rounded-xl border border-[#ab9b8e]/30 px-3 py-2 text-left text-xs font-semibold text-[#5a5a5a] sm:block"
+            >
+              <span className="block text-[#8690a2]">{profile?.fullName || "Student"}</span>
+              <span>{profile?.student?.registrationNo}</span>
+            </button>
+            <button onClick={logout} className="rounded-xl p-2 text-red-600 hover:bg-red-50" title="Logout">
+              <LogOut className="h-4 w-4" />
+            </button>
           </div>
         </div>
       </header>
 
-      {/* THREE COLUMN LAYOUT CONTAINER */}
-      <div className="flex-1 flex w-full pt-[56px]">
-
-        {/* LEFT SIDEBAR */}
-        <aside className="hidden md:flex flex-col w-[220px] fixed left-0 top-[56px] h-[calc(100vh-56px)] bg-[#e0decd] border-r border-[#ab9b8e]/25 z-30 justify-between py-4 px-3">
-          <div className="flex flex-col gap-6">
-            {/* Top profile mini card */}
-            <div className="bg-[#f5f3ec]/65 p-3 rounded-xl border border-[#ab9b8e]/20 flex flex-col gap-2">
-              <div className="flex items-center gap-2.5">
-                <div className="w-9 h-9 rounded-full bg-[#8690a2] text-white flex items-center justify-center font-bold text-sm">
-                  {getInitials(currentUserName)}
-                </div>
-                <div className="flex flex-col min-w-0">
-                  <span className="font-bold text-xs text-[#3a3a3a] truncate">{currentUserName}</span>
-                  <span className="text-[10px] text-[#5a5a5a] font-medium truncate">{currentUserDept} · {currentUserYear}</span>
-                </div>
-              </div>
-              <button
-                onClick={() => router.push("/student/profile")}
-                className="text-[10px] font-bold text-[#d2c296] hover:text-[#d2c296]/80 text-left cursor-pointer transition-colors mt-0.5"
-              >
-                View Profile →
-              </button>
-            </div>
-
-            {/* Navigation links */}
-            <nav className="flex flex-col gap-1">
-              {[
-                { label: "Home Feed", route: "/student/feed", icon: Home, active: true },
-                { label: "Browse Projects", route: "/student/browse", icon: SearchIcon },
-                { label: "My Applications", route: "/student/applications", icon: FileText },
-                { label: "My Profile", route: "/student/profile", icon: User },
-                { label: "Faculty Directory", route: "/student/faculty", icon: GraduationCap },
-                { label: "Leaderboard", route: "/student/leaderboard", icon: Trophy },
-                { label: "Saved Projects", route: "/student/saved", icon: Bookmark },
-                { label: "Invitations", route: "/student/invitations", icon: Mail }
-              ].map((item, idx) => {
-                const Icon = item.icon;
-                return (
-                  <button
-                    key={idx}
-                    onClick={() => router.push(item.route)}
-                    className={`w-full flex items-center gap-3 px-3 py-2 text-xs font-semibold rounded-[10px] transition-all cursor-pointer ${
-                      item.active
-                        ? "bg-[#8690a2] text-white shadow-sm"
-                        : "text-[#5a5a5a] hover:bg-[#bdd1d3]/30 hover:text-[#3a3a3a]"
-                    }`}
-                  >
-                    <Icon className="w-4 h-4" />
-                    <span>{item.label}</span>
-                  </button>
-                );
-              })}
-            </nav>
-          </div>
-
-          <div className="text-center">
-            <span className="text-[10px] text-[#ab9b8e] font-semibold">CampusConnect v1.0</span>
-          </div>
+      <div className="mx-auto grid max-w-7xl gap-6 px-4 py-6 md:grid-cols-[220px_minmax(0,1fr)] md:px-6">
+        <aside className="h-fit rounded-2xl border border-[#ab9b8e]/20 bg-[#e0decd]/70 p-3 md:sticky md:top-20">
+          <NavButton icon={BriefcaseBusiness} label="Feed" onClick={() => router.push("/student/feed")} active />
+          <NavButton icon={FileText} label="My Applications" onClick={() => router.push("/student/applications")} />
+          <NavButton icon={GraduationCap} label="Faculty Directory" onClick={() => router.push("/student/faculty")} />
+          <NavButton icon={Bookmark} label="Saved Projects" onClick={() => router.push("/student/saved")} />
+          <NavButton icon={User} label="My Profile" onClick={() => router.push("/student/profile")} />
         </aside>
 
-        {/* MAIN FEED (CENTER) */}
-        <main className="flex-1 flex flex-col md:ml-[220px] lg:mr-[240px] px-4 py-6 bg-[#f5f3ec] min-h-[calc(100vh-56px)]">
-          <div className="w-full max-w-[680px] mx-auto flex flex-col gap-4">
-            
-            {/* STICKY FILTER TABS */}
-            <div className="sticky top-[56px] z-20 bg-[#f5f3ec] py-3 border-b border-[#ab9b8e]/15 flex items-center gap-2 overflow-x-auto no-scrollbar scroll-smooth">
-              {["All", "Projects", "Hackathons", "Research", "Achievements"].map((tab) => {
-                const isActive = activeTab === tab;
-                return (
-                  <button
-                    key={tab}
-                    onClick={() => setActiveTab(tab)}
-                    className={`px-4 py-1.5 text-xs font-semibold rounded-[20px] border transition-all cursor-pointer whitespace-nowrap ${
-                      isActive
-                        ? "bg-[#8690a2] border-[#8690a2] text-white shadow-sm"
-                        : "border-[#bdd1d3] text-[#8690a2] hover:bg-[#bdd1d3]/20"
-                    }`}
-                  >
-                    {tab}
-                  </button>
-                );
-              })}
+        <main className="min-w-0">
+          <div className="mb-6 flex flex-col gap-4">
+            <div>
+              <p className="text-xs font-bold uppercase tracking-[0.2em] text-[#ab9b8e]">Student feed</p>
+              <h1 className="mt-1 font-playfair text-3xl font-extrabold text-[#8690a2]">Faculty opportunities</h1>
+              <p className="mt-2 text-sm text-[#5a5a5a]">Only projects published by registered faculty are shown here.</p>
             </div>
 
-            {/* FEED CARDS SECTION */}
-            <div className="flex flex-col gap-5 mt-2 pb-16">
-              <AnimatePresence mode="wait">
-                {filteredPosts.length > 0 ? (
-                  <motion.div
-                    key={activeTab + searchQuery}
-                    initial={{ opacity: 0 }}
-                    animate={{ opacity: 1 }}
-                    exit={{ opacity: 0 }}
-                    className="flex flex-col gap-5"
-                  >
-                    {filteredPosts.map((post, index) => {
-                      const isSaved = savedPostIds.includes(post.id);
-                      const isApplied = appliedPostIds.includes(post.id);
-                      const isReacted = reactedPostIds.includes(post.id);
-
-                      // Project Card
-                      if (post.type === "project") {
-                        return (
-                          <motion.div
-                            key={post.id}
-                            initial={{ opacity: 0, y: 30 }}
-                            animate={{ opacity: 1, y: 0 }}
-                            transition={{ duration: 0.4, delay: index * 0.08 }}
-                            className="bg-[#e0decd]/80 border border-[#ab9b8e]/25 rounded-[16px] p-5 shadow-sm hover:shadow-md transition-shadow relative overflow-hidden"
-                          >
-                            {/* Card Header */}
-                            <div className="flex items-center justify-between mb-3">
-                              <div className="flex items-center gap-2.5">
-                                <div className="w-10 h-10 rounded-full bg-gradient-to-br from-[#8690a2] to-[#bdd1d3] text-white flex items-center justify-center font-bold text-sm shadow-inner">
-                                  {post.faculty ? getInitials(post.faculty) : "FC"}
-                                </div>
-                                <div className="flex flex-col">
-                                  <span className="font-bold text-xs text-[#3a3a3a]">{post.faculty} · {post.dept} Dept</span>
-                                  <span className="text-[10px] text-[#5a5a5a] font-medium">{post.time}</span>
-                                </div>
-                              </div>
-                            </div>
-
-                            <hr className="border-[#ab9b8e]/25 my-3" />
-
-                            {/* Tags */}
-                            <div className="flex items-center gap-2 mb-3">
-                              <span className="bg-[#8690a2] text-white px-2 py-0.5 rounded-full text-[9px] font-bold tracking-wider uppercase flex items-center gap-1">
-                                🚀 PROJECT
-                              </span>
-                              {post.domain && (
-                                <span className="bg-[#d2c296]/20 border border-[#d2c296] text-[#8690a2] px-2 py-0.5 rounded-full text-[9px] font-bold">
-                                  {post.domain}
-                                </span>
-                              )}
-                            </div>
-
-                            {/* Title & Description */}
-                            <h2 
-                              className="text-base md:text-lg font-bold text-[#8690a2] mb-1.5 leading-snug"
-                              style={{ fontFamily: "'Playfair Display', Georgia, serif" }}
-                            >
-                              &ldquo;{post.title}&rdquo;
-                            </h2>
-                            <p className="text-xs text-[#5a5a5a] mb-4 leading-relaxed">{post.description}</p>
-
-                            {/* Project details list */}
-                            <div className="flex flex-col gap-2 bg-[#f5f3ec]/40 p-3 rounded-lg border border-[#ab9b8e]/15 mb-4 text-xs text-[#5a5a5a]">
-                              {post.skills && (
-                                <div className="flex items-center flex-wrap gap-1.5">
-                                  <span className="font-bold text-[#3a3a3a] mr-1">Skills needed:</span>
-                                  {post.skills.map((skill) => (
-                                    <span key={skill} className="px-2 py-0.5 bg-[#f5f3ec] border border-[#bdd1d3] text-[#5a5a5a] rounded text-[10px] font-semibold">
-                                      {skill}
-                                    </span>
-                                  ))}
-                                </div>
-                              )}
-                              
-                              <div className="grid grid-cols-2 md:grid-cols-3 gap-2 mt-1.5 pt-1.5 border-t border-[#ab9b8e]/10">
-                                <div>
-                                  <span className="font-bold text-[#3a3a3a]">Duration: </span>{post.duration}
-                                </div>
-                                <div>
-                                  <span className="font-bold text-[#3a3a3a]">Students: </span>{post.slots} ({post.remaining} left)
-                                </div>
-                                <div className="col-span-2 md:col-span-1">
-                                  <span className="font-bold text-[#3a3a3a]">Deadline: </span>{post.deadline}
-                                </div>
-                              </div>
-                            </div>
-
-                            <hr className="border-[#ab9b8e]/25 my-3" />
-
-                            {/* Actions / Compatibility */}
-                            <div className="flex items-center justify-between mt-2">
-                              {post.compatibility && (
-                                <span className="bg-[#d2c296] text-[#3a3a3a] font-bold text-[10px] px-2.5 py-1 rounded-full shadow-sm">
-                                  ⚡ {post.compatibility}% match
-                                </span>
-                              )}
-                              
-                              <div className="flex items-center gap-2">
-                                <motion.button
-                                  whileTap={{ scale: 0.95 }}
-                                  onClick={() => toggleSave(post.id)}
-                                  className={`px-3 py-1.5 rounded-lg border border-[#ab9b8e] text-xs font-semibold flex items-center gap-1.5 transition-all cursor-pointer ${
-                                    isSaved 
-                                      ? "bg-[#d2c296] border-[#d2c296] text-[#3a3a3a]" 
-                                      : "text-[#8690a2] hover:bg-[#e0decd]"
-                                  }`}
-                                >
-                                  <Bookmark className={`w-3.5 h-3.5 ${isSaved ? "fill-[#3a3a3a]" : ""}`} />
-                                  <span>{isSaved ? "Saved" : "Save"}</span>
-                                </motion.button>
-
-                                <motion.button
-                                  whileTap={{ scale: 0.96 }}
-                                  onClick={() => toggleApply(post, "project")}
-                                  disabled={isApplied}
-                                  className={`px-4 py-1.5 rounded-lg text-xs font-bold transition-all flex items-center gap-1 cursor-pointer ${
-                                    isApplied
-                                      ? "bg-[#ab9b8e] text-white cursor-not-allowed"
-                                      : "bg-[#8690a2] text-white hover:bg-[#bdd1d3] hover:text-[#3a3a3a] shadow-sm"
-                                  }`}
-                                >
-                                  <span>{isApplied ? "Applied ✓" : "Apply →"}</span>
-                                </motion.button>
-                              </div>
-                            </div>
-                          </motion.div>
-                        );
-                      }
-
-                      // Hackathon Card
-                      if (post.type === "hackathon") {
-                        return (
-                          <motion.div
-                            key={post.id}
-                            initial={{ opacity: 0, y: 30 }}
-                            animate={{ opacity: 1, y: 0 }}
-                            transition={{ duration: 0.4, delay: index * 0.08 }}
-                            className="bg-[#e0decd]/80 border border-[#ab9b8e]/25 rounded-[16px] p-5 shadow-sm hover:shadow-md transition-shadow relative overflow-hidden"
-                          >
-                            <div className="flex items-center justify-between mb-3">
-                              <div className="flex items-center gap-2.5">
-                                <div className="w-10 h-10 rounded-full bg-gradient-to-br from-[#8690a2] to-[#bdd1d3] text-white flex items-center justify-center font-bold text-sm shadow-inner">
-                                  {post.faculty ? getInitials(post.faculty) : "HK"}
-                                </div>
-                                <div className="flex flex-col">
-                                  <span className="font-bold text-xs text-[#3a3a3a]">{post.faculty} · {post.dept}</span>
-                                  <span className="text-[10px] text-[#5a5a5a] font-medium">{post.time}</span>
-                                </div>
-                              </div>
-                            </div>
-
-                            <hr className="border-[#ab9b8e]/25 my-3" />
-
-                            <div className="flex items-center gap-2 mb-3">
-                              <span className="bg-[#d2c296] text-[#3a3a3a] px-2 py-0.5 rounded-full text-[9px] font-bold tracking-wider uppercase flex items-center gap-1">
-                                🏆 HACKATHON
-                              </span>
-                            </div>
-
-                            <h2 
-                              className="text-base md:text-lg font-bold text-[#8690a2] mb-1.5 leading-snug"
-                              style={{ fontFamily: "'Playfair Display', Georgia, serif" }}
-                            >
-                              &ldquo;{post.title}&rdquo;
-                            </h2>
-                            <p className="text-xs text-[#5a5a5a] mb-4 leading-relaxed">{post.description}</p>
-
-                            <div className="flex flex-col gap-2 bg-[#f5f3ec]/40 p-3 rounded-lg border border-[#ab9b8e]/15 mb-4 text-xs text-[#5a5a5a]">
-                              <div>
-                                <span className="font-bold text-[#3a3a3a]">Need: </span>
-                                <span className="text-[#8690a2] font-semibold">{post.rolesNeeded}</span>
-                              </div>
-                              <div className="grid grid-cols-2 gap-2 mt-1.5 pt-1.5 border-t border-[#ab9b8e]/10">
-                                <div>
-                                  <span className="font-bold text-[#3a3a3a]">Team Slots: </span>{post.teamSlots}
-                                </div>
-                                <div>
-                                  <span className="font-bold text-[#3a3a3a]">Deadline: </span>{post.deadline}
-                                </div>
-                              </div>
-                            </div>
-
-                            <hr className="border-[#ab9b8e]/25 my-3" />
-
-                            <div className="flex items-center justify-between mt-2">
-                              {post.compatibility && (
-                                <span className="bg-[#d2c296] text-[#3a3a3a] font-bold text-[10px] px-2.5 py-1 rounded-full shadow-sm">
-                                  ⚡ {post.compatibility}% match
-                                </span>
-                              )}
-                              
-                              <div className="flex items-center gap-2">
-                                <motion.button
-                                  whileTap={{ scale: 0.95 }}
-                                  onClick={() => toggleSave(post.id)}
-                                  className={`px-3 py-1.5 rounded-lg border border-[#ab9b8e] text-xs font-semibold flex items-center gap-1.5 transition-all cursor-pointer ${
-                                    isSaved 
-                                      ? "bg-[#d2c296] border-[#d2c296] text-[#3a3a3a]" 
-                                      : "text-[#8690a2] hover:bg-[#e0decd]"
-                                  }`}
-                                >
-                                  <Bookmark className={`w-3.5 h-3.5 ${isSaved ? "fill-[#3a3a3a]" : ""}`} />
-                                  <span>{isSaved ? "Saved" : "Save"}</span>
-                                </motion.button>
-
-                                <motion.button
-                                  whileTap={{ scale: 0.96 }}
-                                  onClick={() => toggleApply(post, "hackathon")}
-                                  disabled={isApplied}
-                                  className={`px-4 py-1.5 rounded-lg text-xs font-bold transition-all flex items-center gap-1 cursor-pointer ${
-                                    isApplied
-                                      ? "bg-[#ab9b8e] text-white cursor-not-allowed"
-                                      : "bg-[#8690a2] text-white hover:bg-[#bdd1d3] hover:text-[#3a3a3a] shadow-sm"
-                                  }`}
-                                >
-                                  <span>{isApplied ? "Joined Team ✓" : "Join Team →"}</span>
-                                </motion.button>
-                              </div>
-                            </div>
-                          </motion.div>
-                        );
-                      }
-
-                      // Achievement Card
-                      if (post.type === "achievement") {
-                        return (
-                          <motion.div
-                            key={post.id}
-                            initial={{ opacity: 0, y: 30 }}
-                            animate={{ opacity: 1, y: 0 }}
-                            transition={{ duration: 0.4, delay: index * 0.08 }}
-                            className="bg-[#e0decd]/80 border border-[#ab9b8e]/25 rounded-[16px] p-4 shadow-sm hover:shadow-md transition-shadow relative overflow-hidden"
-                          >
-                            <div className="flex items-center justify-between mb-2">
-                              <div className="flex items-center gap-2">
-                                <div className="w-8 h-8 rounded-full bg-[#bdd1d3] text-[#3a3a3a] flex items-center justify-center font-bold text-xs">
-                                  {post.studentName ? getInitials(post.studentName) : "ST"}
-                                </div>
-                                <div className="flex flex-col">
-                                  <span className="font-bold text-xs text-[#3a3a3a]">{post.studentName}</span>
-                                  <span className="text-[9px] text-[#5a5a5a] font-medium">{post.time}</span>
-                                </div>
-                              </div>
-                              <span className="bg-[#bdd1d3] text-[#3a3a3a] px-2.5 py-0.5 rounded-full text-[9px] font-bold tracking-wider uppercase">
-                                🏅 ACHIEVEMENT
-                              </span>
-                            </div>
-
-                            <div className="mt-2.5 pl-1">
-                              <h2 
-                                className="text-sm md:text-base font-bold text-[#8690a2] mb-1 leading-snug"
-                                style={{ fontFamily: "'Playfair Display', Georgia, serif" }}
-                              >
-                                {post.title}
-                              </h2>
-                              
-                              {post.verifiedBy && (
-                                <p className="text-[10px] text-[#8690a2] font-semibold flex items-center gap-1 mt-1">
-                                  <span>✅</span> {post.verifiedBy}
-                                </p>
-                              )}
-                            </div>
-
-                            <hr className="border-[#ab9b8e]/20 my-3" />
-
-                            <div className="flex items-center justify-between pl-1">
-                              <span className="text-[10px] text-[#5a5a5a] font-semibold">
-                                👏 {post.reactions} {post.reactions === 1 ? "person reacted" : "people reacted"}
-                              </span>
-
-                              <motion.button
-                                whileTap={{ scale: 0.9 }}
-                                onClick={() => handleReact(post.id)}
-                                className={`px-3 py-1 rounded-full border text-[10px] font-bold flex items-center gap-1.5 cursor-pointer transition-all ${
-                                  isReacted
-                                    ? "bg-[#8690a2] border-[#8690a2] text-white"
-                                    : "border-[#ab9b8e] text-[#8690a2] hover:bg-[#bdd1d3]/30"
-                                }`}
-                              >
-                                <motion.span
-                                  animate={isReacted ? { y: [0, -10, 0], scale: [1, 1.3, 1] } : {}}
-                                  transition={{ duration: 0.3 }}
-                                  className="inline-block"
-                                >
-                                  👏
-                                </motion.span>
-                                <span>{isReacted ? "Reacted" : "React"}</span>
-                              </motion.button>
-                            </div>
-                          </motion.div>
-                        );
-                      }
-
-                      // Faculty Research Card
-                      if (post.type === "research") {
-                        return (
-                          <motion.div
-                            key={post.id}
-                            initial={{ opacity: 0, y: 30 }}
-                            animate={{ opacity: 1, y: 0 }}
-                            transition={{ duration: 0.4, delay: index * 0.08 }}
-                            className="bg-[#e0decd]/80 border border-[#ab9b8e]/25 rounded-[16px] p-5 shadow-sm hover:shadow-md transition-shadow relative overflow-hidden"
-                          >
-                            <div className="flex items-center justify-between mb-3">
-                              <div className="flex items-center gap-2.5">
-                                <div className="w-10 h-10 rounded-full bg-gradient-to-br from-[#8690a2] to-[#ab9b8e] text-white flex items-center justify-center font-bold text-sm shadow-inner">
-                                  {post.faculty ? getInitials(post.faculty) : "FC"}
-                                </div>
-                                <div className="flex flex-col">
-                                  <span className="font-bold text-xs text-[#3a3a3a]">{post.faculty}</span>
-                                  <span className="text-[10px] text-[#5a5a5a] font-medium">{post.designation} · {post.dept}</span>
-                                </div>
-                              </div>
-                              <span className="text-[10px] text-[#ab9b8e] font-semibold">{post.time}</span>
-                            </div>
-
-                            <hr className="border-[#ab9b8e]/25 my-3" />
-
-                            <div className="flex items-center gap-2 mb-3">
-                              <span className="bg-[#ab9b8e] text-white px-2.5 py-0.5 rounded-full text-[9px] font-bold tracking-wider uppercase">
-                                🔬 RESEARCH
-                              </span>
-                            </div>
-
-                            <h2 
-                              className="text-base md:text-lg font-bold text-[#8690a2] mb-1.5 leading-snug"
-                              style={{ fontFamily: "'Playfair Display', Georgia, serif" }}
-                            >
-                              &ldquo;{post.title}&rdquo;
-                            </h2>
-                            <p className="text-xs text-[#5a5a5a] mb-3.5 leading-relaxed">{post.description}</p>
-                            
-                            <p className="text-xs text-[#8690a2] font-bold italic mb-4">
-                              &ldquo;Looking for research assistants with background in {post.domain || "relevant areas"}.&rdquo;
-                            </p>
-
-                            <hr className="border-[#ab9b8e]/25 my-3" />
-
-                            <div className="flex items-center justify-between mt-2">
-                              {post.compatibility && (
-                                <span className="bg-[#d2c296] text-[#3a3a3a] font-bold text-[10px] px-2.5 py-1 rounded-full shadow-sm">
-                                  ⚡ {post.compatibility}% match
-                                </span>
-                              )}
-                              
-                              <div className="flex items-center gap-2">
-                                <motion.button
-                                  whileTap={{ scale: 0.95 }}
-                                  onClick={() => toggleSave(post.id)}
-                                  className={`px-3 py-1.5 rounded-lg border border-[#ab9b8e] text-xs font-semibold flex items-center gap-1.5 transition-all cursor-pointer ${
-                                    isSaved 
-                                      ? "bg-[#d2c296] border-[#d2c296] text-[#3a3a3a]" 
-                                      : "text-[#8690a2] hover:bg-[#e0decd]"
-                                  }`}
-                                >
-                                  <Bookmark className={`w-3.5 h-3.5 ${isSaved ? "fill-[#3a3a3a]" : ""}`} />
-                                  <span>{isSaved ? "Saved" : "Save"}</span>
-                                </motion.button>
-
-                                <motion.button
-                                  whileTap={{ scale: 0.96 }}
-                                  onClick={() => toggleApply(post, "research")}
-                                  disabled={isApplied}
-                                  className={`px-4 py-1.5 rounded-lg text-xs font-bold transition-all flex items-center gap-1 cursor-pointer ${
-                                    isApplied
-                                      ? "bg-[#ab9b8e] text-white cursor-not-allowed"
-                                      : "bg-[#8690a2] text-white hover:bg-[#bdd1d3] hover:text-[#3a3a3a] shadow-sm"
-                                  }`}
-                                >
-                                  <span>{isApplied ? "Applied ✓" : "Apply →"}</span>
-                                </motion.button>
-                              </div>
-                            </div>
-                          </motion.div>
-                        );
-                      }
-
-                      return null;
-                    })}
-                  </motion.div>
-                ) : (
-                  <motion.div
-                    initial={{ opacity: 0, y: 10 }}
-                    animate={{ opacity: 1, y: 0 }}
-                    exit={{ opacity: 0 }}
-                    className="p-8 text-center bg-[#e0decd]/40 border border-[#bdd1d3] rounded-2xl flex flex-col items-center gap-2.5"
-                  >
-                    <Sparkles className="w-8 h-8 text-[#ab9b8e]" />
-                    <p className="font-bold text-sm text-[#8690a2]">No matching posts found</p>
-                    <p className="text-xs text-[#5a5a5a]">Try clearing search filters or queries.</p>
-                    {searchQuery && (
-                      <button
-                        onClick={() => setSearchQuery("")}
-                        className="px-3.5 py-1.5 rounded-lg bg-[#8690a2] text-white text-xs font-bold hover:bg-[#bdd1d3] hover:text-[#3a3a3a] mt-2 transition-colors cursor-pointer"
-                      >
-                        Reset Search
-                      </button>
-                    )}
-                  </motion.div>
-                )}
-              </AnimatePresence>
+            <div className="relative md:hidden">
+              <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-[#ab9b8e]" />
+              <input
+                value={searchQuery}
+                onChange={(event) => setSearchQuery(event.target.value)}
+                placeholder="Search projects"
+                className="w-full rounded-xl border border-[#bdd1d3] bg-white/70 py-2.5 pl-10 pr-4 text-sm outline-none"
+              />
             </div>
 
-          </div>
-        </main>
-
-        {/* RIGHT SIDEBAR */}
-        <aside className="hidden lg:flex flex-col w-[240px] fixed right-0 top-[56px] h-[calc(100vh-56px)] bg-[#e0decd] border-l border-[#ab9b8e]/25 z-30 overflow-y-auto py-5 px-4 gap-6 scrollbar-thin">
-          
-          {/* SECTION 1: Recommended For You */}
-          <div className="flex flex-col gap-3">
-            <span 
-              className="text-[#8690a2] text-[10px] font-extrabold uppercase tracking-widest block"
-            >
-              Recommended for you
-            </span>
-            <div className="flex flex-col gap-2.5">
-              {[
-                { title: "AI Traffic Optimization", faculty: "Dr. Godfrey", compatibility: 87 },
-                { title: "Blockchain Certificate Verification", faculty: "Dr. Baskar M.", compatibility: 91 },
-                { title: "NLP Research Assistant", faculty: "Dr. Godfrey", compatibility: 91 }
-              ].map((item, idx) => (
-                <div
-                  key={idx}
-                  className="bg-[#f5f3ec] border border-[#bdd1d3] rounded-[10px] p-3 flex flex-col gap-1.5 shadow-sm hover:border-[#8690a2] transition-colors cursor-pointer"
-                  onClick={() => setSearchQuery(item.title)}
-                >
-                  <div className="flex flex-col">
-                    <span className="font-bold text-xs text-[#3a3a3a] truncate">{item.title}</span>
-                    <span className="text-[9px] text-[#5a5a5a]">{item.faculty}</span>
-                  </div>
-                  <div className="flex flex-col gap-1">
-                    <div className="flex justify-between items-center text-[9px] font-bold text-[#8690a2]">
-                      <span>Match Compatibility</span>
-                      <span>{item.compatibility}%</span>
-                    </div>
-                    <div className="w-full h-1 bg-[#bdd1d3]/40 rounded-full overflow-hidden">
-                      <div className="h-full bg-[#d2c296]" style={{ width: `${item.compatibility}%` }} />
-                    </div>
-                  </div>
-                </div>
-              ))}
-            </div>
-          </div>
-
-          <hr className="border-[#ab9b8e]/20" />
-
-          {/* SECTION 2: Campus Talent Board (Top 3) */}
-          <div className="flex flex-col gap-3">
-            <span 
-              className="text-[#8690a2] text-[10px] font-extrabold uppercase tracking-widest block"
-            >
-              This Week&apos;s Leaders
-            </span>
-            <div className="flex flex-col gap-2.5">
-              {[
-                { rank: "🥇", name: "Priya Sharma", pts: 1800, track: "AI/ML", avatarColor: "bg-red-200" },
-                { rank: "🥈", name: "Karan Mehta", pts: 1620, track: "Web Dev", avatarColor: "bg-green-200" },
-                { rank: "🥉", name: "Ananya K.", pts: 1540, track: "Research", avatarColor: "bg-blue-200" }
-              ].map((student, idx) => (
-                <div
-                  key={idx}
-                  className="flex items-center justify-between p-2 rounded-lg bg-[#f5f3ec]/60 border border-[#ab9b8e]/10 shadow-sm"
-                >
-                  <div className="flex items-center gap-2 min-w-0">
-                    <span className="text-sm font-semibold">{student.rank}</span>
-                    <div className="w-7 h-7 rounded-full bg-[#8690a2]/30 flex items-center justify-center font-bold text-[10px] text-[#3a3a3a]">
-                      {getInitials(student.name)}
-                    </div>
-                    <div className="flex flex-col min-w-0">
-                      <span className="font-bold text-xs text-[#3a3a3a] truncate">{student.name}</span>
-                      <span className="text-[9px] text-[#5a5a5a] truncate font-medium">{student.track}</span>
-                    </div>
-                  </div>
-                  <span className="bg-[#d2c296] text-[#3a3a3a] text-[9px] font-extrabold px-1.5 py-0.5 rounded-full whitespace-nowrap">
-                    {student.pts} pts
-                  </span>
-                </div>
-              ))}
-            </div>
-          </div>
-
-          <hr className="border-[#ab9b8e]/20" />
-
-          {/* SECTION 3: Faculty Active Now */}
-          <div className="flex flex-col gap-3">
-            <span 
-              className="text-[#8690a2] text-[10px] font-extrabold uppercase tracking-widest block"
-            >
-              Faculty Accepting Teams
-            </span>
-            <div className="flex flex-col gap-2.5">
-              {[
-                { name: "Dr. Godfrey", dept: "CSE Department", slots: 2 },
-                { name: "Dr. Baskar M.", dept: "CSE Department", slots: 1 },
-                { name: "Dr. Priya R.", dept: "ECE Department", slots: 2 }
-              ].map((faculty, idx) => (
-                <div
-                  key={idx}
-                  className="bg-[#f5f3ec]/60 border border-[#ab9b8e]/15 rounded-lg p-2.5 flex flex-col gap-1 shadow-sm"
-                >
-                  <div className="flex flex-col">
-                    <span className="font-bold text-xs text-[#3a3a3a]">{faculty.name}</span>
-                    <span className="text-[9px] text-[#5a5a5a]">{faculty.dept}</span>
-                  </div>
-                  <div className="flex items-center justify-between mt-1 pt-1 border-t border-[#ab9b8e]/10">
-                    <span className="text-[9px] text-[#d2c296] font-bold uppercase tracking-wider">{faculty.slots} slots open</span>
-                    <button
-                      onClick={() => { router.push("/student/faculty"); }}
-                      className="text-[9px] font-extrabold text-[#8690a2] hover:underline cursor-pointer"
-                    >
-                      View Profile →
-                    </button>
-                  </div>
-                </div>
-              ))}
-            </div>
-          </div>
-        </aside>
-
-      </div>
-
-      {/* MOBILE BOTTOM NAVIGATION BAR */}
-      <div className="fixed bottom-0 left-0 right-0 h-[56px] bg-[#e0decd] border-t border-[#ab9b8e]/30 z-40 md:hidden flex items-center justify-around px-2 shadow-lg">
-        {[
-          { label: "Home", icon: Home, active: true, action: () => { router.push("/student/feed"); } },
-          { label: "Search", icon: SearchIcon, action: () => { setIsSearchFocused(true); } },
-          { label: "Applications", icon: FileText, action: () => { router.push("/student/applications"); } },
-          { label: "Profile", icon: User, action: () => { router.push("/student/profile"); } },
-          { label: "More", icon: MoreHorizontal, action: () => { setShowMobileMore(true); } }
-        ].map((item, idx) => {
-          const Icon = item.icon;
-          return (
-            <button
-              key={idx}
-              onClick={item.action}
-              className="flex flex-col items-center justify-center py-1 flex-1 cursor-pointer transition-colors"
-            >
-              <Icon className={`w-5 h-5 ${item.active ? "text-[#8690a2]" : "text-[#ab9b8e]"}`} />
-              <span className={`text-[9px] font-bold mt-0.5 ${item.active ? "text-[#8690a2]" : "text-[#ab9b8e]"}`}>
-                {item.label}
-              </span>
-            </button>
-          );
-        })}
-      </div>
-
-      {/* MOBILE MORE SHEET / DRAWER */}
-      <AnimatePresence>
-        {showMobileMore && (
-          <>
-            <motion.div
-              initial={{ opacity: 0 }}
-              animate={{ opacity: 0.5 }}
-              exit={{ opacity: 0 }}
-              onClick={() => setShowMobileMore(false)}
-              className="fixed inset-0 bg-black z-40 md:hidden"
-            />
-            <motion.div
-              initial={{ y: "100%" }}
-              animate={{ y: 0 }}
-              exit={{ y: "100%" }}
-              transition={{ type: "spring", damping: 25, stiffness: 220 }}
-              className="fixed bottom-0 left-0 right-0 bg-[#e0decd] border-t border-[#ab9b8e]/40 rounded-t-[20px] p-5 z-50 md:hidden flex flex-col gap-4"
-            >
-              <div className="flex justify-between items-center border-b border-[#ab9b8e]/20 pb-2">
-                <span className="font-bold text-[#8690a2] text-sm uppercase tracking-wider">More Campus Options</span>
+            <div className="flex flex-wrap gap-2">
+              {TABS.map((tab) => (
                 <button
-                  onClick={() => setShowMobileMore(false)}
-                  className="p-1 rounded-full bg-[#f5f3ec] text-[#ab9b8e] hover:text-[#3a3a3a]"
+                  key={tab}
+                  onClick={() => setActiveTab(tab)}
+                  className={`rounded-full px-4 py-2 text-xs font-bold transition ${activeTab === tab ? "bg-[#8690a2] text-white" : "border border-[#ab9b8e]/30 bg-white/60 text-[#5a5a5a] hover:bg-white"}`}
                 >
-                  <X className="w-4 h-4" />
+                  {tab}
                 </button>
-              </div>
-              <div className="grid grid-cols-2 gap-3 py-2">
-                {[
-                  { label: "Faculty Directory", route: "/student/faculty", icon: GraduationCap },
-                  { label: "Leaderboard", route: "/student/leaderboard", icon: Trophy },
-                  { label: "Saved Projects", route: "/student/saved", icon: Bookmark },
-                  { label: "Invitations", route: "/student/invitations", icon: Mail },
-                  { label: "Setup Profile", route: "/student/setup", icon: Settings }
-                ].map((item, idx) => {
-                  const Icon = item.icon;
-                  return (
-                    <button
-                      key={idx}
-                      onClick={() => { router.push(item.route); setShowMobileMore(false); }}
-                      className="flex items-center gap-2.5 p-3 rounded-xl bg-[#f5f3ec] hover:bg-[#bdd1d3]/30 border border-[#ab9b8e]/20 transition-all cursor-pointer text-left"
-                    >
-                      <Icon className="w-4 h-4 text-[#8690a2]" />
-                      <span className="text-xs font-semibold text-[#3a3a3a]">{item.label}</span>
-                    </button>
-                  );
-                })}
-              </div>
-              <button
-                onClick={handleLogout}
-                className="w-full py-3 bg-red-500/10 hover:bg-red-500/20 text-red-600 hover:text-red-700 font-bold rounded-xl text-center text-xs flex items-center justify-center gap-2 border border-red-500/20 cursor-pointer mt-1"
-              >
-                <LogOut className="w-4 h-4" />
-                <span>Logout Session</span>
-              </button>
-            </motion.div>
-          </>
-        )}
-      </AnimatePresence>
-
-      {/* MOBILE SEARCH PANEL EXPANSION */}
-      <AnimatePresence>
-        {isSearchFocused && (
-          <motion.div
-            initial={{ opacity: 0 }}
-            animate={{ opacity: 1 }}
-            exit={{ opacity: 0 }}
-            className="fixed inset-0 bg-[#f5f3ec] z-50 p-4 md:hidden flex flex-col gap-4 overflow-y-auto"
-          >
-            <div className="flex items-center gap-3">
-              <div className="relative flex-1">
-                <input
-                  type="text"
-                  placeholder="Search projects, faculty, skills..."
-                  value={searchQuery}
-                  onChange={(e) => setSearchQuery(e.target.value)}
-                  autoFocus
-                  className="w-full h-10 pl-10 pr-4 rounded-full bg-[#e0decd] border border-[#bdd1d3] text-sm text-[#3a3a3a] placeholder-[#ab9b8e] focus:outline-none"
-                />
-                <SearchIcon className="w-4 h-4 text-[#ab9b8e] absolute left-3.5 top-1/2 -translate-y-1/2" />
-              </div>
-              <button
-                onClick={() => { setIsSearchFocused(false); }}
-                className="px-3 py-2 text-xs font-bold text-[#8690a2] bg-[#e0decd] border border-[#bdd1d3] rounded-full"
-              >
-                Cancel
-              </button>
+              ))}
             </div>
+          </div>
 
-            <div className="flex flex-col gap-4 mt-2">
-              <div>
-                <span className="font-bold text-[#8690a2] block mb-2 uppercase tracking-wider text-[10px]">Recommended for you</span>
-                <div className="flex flex-wrap gap-2">
-                  {["AI & ML", "Blockchain", "Healthcare NLP"].map((tag) => (
-                    <button
-                      key={tag}
-                      onClick={() => { setSearchQuery(tag); setIsSearchFocused(false); }}
-                      className="px-3 py-1.5 rounded-full bg-[#e0decd] hover:bg-[#bdd1d3] text-[#3a3a3a] border border-[#ab9b8e]/25 text-xs font-semibold cursor-pointer"
-                    >
-                      {tag}
-                    </button>
-                  ))}
-                </div>
-              </div>
+          {error && <div className="mb-5 rounded-xl border border-red-300 bg-red-50 px-4 py-3 text-sm text-red-700">{error}</div>}
 
-              <div>
-                <span className="font-bold text-[#8690a2] block mb-2 uppercase tracking-wider text-[10px]">Based on your skills</span>
-                <div className="flex flex-wrap gap-2">
-                  {["React Web", "PyTorch Training", "Node.js API"].map((tag) => (
-                    <button
-                      key={tag}
-                      onClick={() => { setSearchQuery(tag); setIsSearchFocused(false); }}
-                      className="px-3 py-1.5 rounded-full bg-[#e0decd] hover:bg-[#bdd1d3] text-[#3a3a3a] border border-[#ab9b8e]/25 text-xs font-semibold cursor-pointer"
-                    >
-                      {tag}
-                    </button>
-                  ))}
-                </div>
-              </div>
+          {filteredProjects.length === 0 ? (
+            <div className="rounded-2xl border border-dashed border-[#ab9b8e]/40 bg-[#e0decd]/45 p-10 text-center">
+              <Users className="mx-auto h-9 w-9 text-[#ab9b8e]" />
+              <h2 className="mt-4 text-lg font-extrabold text-[#8690a2]">
+                {projects.length === 0 ? "No faculty projects have been posted yet" : "No matching projects"}
+              </h2>
+              <p className="mx-auto mt-2 max-w-lg text-sm text-[#5a5a5a]">
+                {projects.length === 0
+                  ? "Once a faculty member publishes a project, it will appear here automatically."
+                  : "Try another search term or clear the current filter."}
+              </p>
+            </div>
+          ) : (
+            <div className="grid gap-4">
+              {filteredProjects.map((project) => {
+                const applied = appliedProjectIds.includes(project.id);
+                const saved = savedProjectIds.includes(project.id);
+                const remaining = Math.max(0, project.slots - project._count.applications);
+                const busy = workingProjectId === project.id;
 
-              <div>
-                <span className="font-bold text-[#8690a2] block mb-2 uppercase tracking-wider text-[10px]">Recently posted</span>
-                <div className="flex flex-col gap-2">
-                  {[
-                    { title: "Smart India Hackathon 2025", type: "Hackathon" },
-                    { title: "AI-based Traffic Optimization System", type: "Project" }
-                  ].map((item, idx) => (
-                    <div
-                      key={idx}
-                      onClick={() => { setSearchQuery(item.title); setIsSearchFocused(false); }}
-                      className="p-3 rounded-xl bg-[#e0decd]/75 hover:bg-[#bdd1d3]/35 cursor-pointer flex items-center justify-between transition-colors border border-[#ab9b8e]/20"
-                    >
-                      <span className="font-bold text-xs text-[#3a3a3a] truncate">{item.title}</span>
-                      <span className="text-[9px] px-2 py-0.5 rounded bg-[#8690a2] text-white font-bold">{item.type}</span>
+                return (
+                  <article key={project.id} className="rounded-2xl border border-[#ab9b8e]/25 bg-white/75 p-5 shadow-sm">
+                    <div className="flex flex-col justify-between gap-5 lg:flex-row lg:items-start">
+                      <div className="min-w-0 flex-1">
+                        <div className="mb-3 flex flex-wrap items-center gap-2 text-[10px] font-extrabold uppercase tracking-wider">
+                          <span className="rounded-full bg-[#8690a2]/10 px-2.5 py-1 text-[#8690a2]">{formatPostType(project.postType)}</span>
+                          <span className="rounded-full bg-[#bdd1d3]/35 px-2.5 py-1 text-[#5a5a5a]">{project.domain}</span>
+                          <span className="rounded-full bg-[#e0decd] px-2.5 py-1 text-[#5a5a5a]">{project.mode}</span>
+                        </div>
+
+                        <h2 className="text-xl font-extrabold text-[#3a3a3a]">{project.title}</h2>
+                        <p className="mt-1 text-sm font-semibold text-[#8690a2]">
+                          {project.faculty.profile.fullName || "SRM Faculty"}
+                          {project.faculty.department ? ` · ${project.faculty.department}` : ""}
+                          {project.faculty.designation ? ` · ${project.faculty.designation}` : ""}
+                        </p>
+                        <p className="mt-3 text-sm leading-6 text-[#5a5a5a]">{project.description}</p>
+
+                        {project.skills.length > 0 && (
+                          <div className="mt-4 flex flex-wrap gap-2">
+                            {project.skills.map((skill) => (
+                              <span key={skill} className="rounded-full border border-[#bdd1d3] bg-[#f5f3ec] px-2.5 py-1 text-[11px] font-semibold text-[#5a5a5a]">
+                                {skill}
+                              </span>
+                            ))}
+                          </div>
+                        )}
+
+                        <div className="mt-4 flex flex-wrap gap-x-5 gap-y-2 text-xs text-[#5a5a5a]">
+                          <span className="inline-flex items-center gap-1.5"><CalendarDays className="h-3.5 w-3.5" /> Deadline {new Date(project.deadline).toLocaleDateString()}</span>
+                          <span>{project.duration}</span>
+                          <span>{remaining} of {project.slots} slots remaining</span>
+                          <span>{project.skillLevel.replaceAll("_", " ")}</span>
+                        </div>
+                      </div>
+
+                      <div className="flex shrink-0 gap-2">
+                        <button
+                          onClick={() => void toggleSaved(project)}
+                          disabled={busy}
+                          className={`inline-flex items-center gap-1.5 rounded-xl border px-4 py-2 text-xs font-bold transition disabled:opacity-50 ${saved ? "border-[#8690a2] bg-[#8690a2]/10 text-[#8690a2]" : "border-[#ab9b8e]/40 text-[#5a5a5a] hover:bg-[#f5f3ec]"}`}
+                        >
+                          {saved ? <BookmarkCheck className="h-4 w-4" /> : <Bookmark className="h-4 w-4" />}
+                          {saved ? "Saved" : "Save"}
+                        </button>
+
+                        <button
+                          onClick={() => void applyToProject(project)}
+                          disabled={applied || busy}
+                          className="rounded-xl bg-[#8690a2] px-4 py-2 text-xs font-bold text-white transition hover:bg-[#748092] disabled:cursor-not-allowed disabled:bg-[#ab9b8e]"
+                        >
+                          {applied ? "Applied ✓" : busy ? "Working…" : "Apply"}
+                        </button>
+                      </div>
                     </div>
-                  ))}
-                </div>
-              </div>
+                  </article>
+                );
+              })}
             </div>
-          </motion.div>
-        )}
-      </AnimatePresence>
-    </motion.div>
+          )}
+        </main>
+      </div>
+
+      {toast && <div className="fixed bottom-6 left-1/2 z-50 -translate-x-1/2 rounded-xl bg-[#3a3a3a] px-5 py-3 text-sm font-semibold text-white shadow-xl">{toast}</div>}
+    </div>
   );
 }
 
-function subscribeToStorage(callback: () => void) {
-  if (typeof window === "undefined") {
-    return () => undefined;
-  }
-
-  window.addEventListener("storage", callback);
-  return () => window.removeEventListener("storage", callback);
+function NavButton({
+  icon: Icon,
+  label,
+  onClick,
+  active = false,
+}: {
+  icon: typeof User;
+  label: string;
+  onClick: () => void;
+  active?: boolean;
+}) {
+  return (
+    <button
+      onClick={onClick}
+      className={`mb-1 flex w-full items-center gap-3 rounded-xl px-3 py-2.5 text-left text-sm font-semibold transition ${active ? "bg-[#8690a2] text-white" : "text-[#5a5a5a] hover:bg-white/60"}`}
+    >
+      <Icon className="h-4 w-4" />
+      {label}
+    </button>
+  );
 }
 
-const EMPTY_POSTS: Post[] = [];
-
-let cachedStudentProfileRaw: string | null | undefined;
-let cachedStudentProfile: CampusConnectUser | null = null;
-let cachedFacultyPostsRaw: string | null | undefined;
-let cachedFacultyPosts: Post[] = EMPTY_POSTS;
-
-function readStudentProfileSnapshot() {
-  if (typeof window === "undefined") {
-    return null;
-  }
-
-  const raw = window.localStorage.getItem("campusconnect_user");
-  if (raw === cachedStudentProfileRaw) {
-    return cachedStudentProfile;
-  }
-
-  cachedStudentProfileRaw = raw;
-  cachedStudentProfile = safeParseJson<CampusConnectUser | null>(raw, null);
-  return cachedStudentProfile;
-}
-
-function readFacultyPostsSnapshot() {
-  if (typeof window === "undefined") {
-    return EMPTY_POSTS;
-  }
-
-  const raw = window.localStorage.getItem("campusconnect_posts");
-  if (raw === cachedFacultyPostsRaw) {
-    return cachedFacultyPosts;
-  }
-
-  cachedFacultyPostsRaw = raw;
-  cachedFacultyPosts = safeParseJson<Post[]>(raw, EMPTY_POSTS);
-  return cachedFacultyPosts;
-}
-
-function getBaseRemaining(id: number) {
-  const post = MOCK_POSTS.find((item) => item.id === id);
-  return post?.remaining ?? 0;
-}
-
-function getBaseReactions(id: number) {
-  const post = MOCK_POSTS.find((item) => item.id === id);
-  return post?.reactions ?? 0;
-}
-
-
-function uiIdFromUuid(value: string) {
-  let hash = 0;
-  for (let index = 0; index < value.length; index += 1) {
-    hash = ((hash << 5) - hash + value.charCodeAt(index)) | 0;
-  }
-  return -Math.abs(hash || 1);
-}
-
-function mapRemoteProject(project: RemoteProject): Post {
-  const uiId = uiIdFromUuid(project.id);
-  const applicationCount = project._count?.applications ?? 0;
-  const postType = project.postType.toUpperCase();
-  const type: Post["type"] =
-    postType === "HACKATHON"
-      ? "hackathon"
-      : postType === "RESEARCH" || postType === "GUEST_LECTURE"
-        ? "research"
-        : "project";
-
-  return {
-    id: uiId,
-    backendId: project.id,
-    type,
-    faculty: project.faculty?.profile?.fullName || "SRM Faculty",
-    dept: project.faculty?.department || "SRM",
-    designation: project.faculty?.designation || undefined,
-    time: new Date(project.createdAt).toLocaleDateString(),
-    title: project.title,
-    description: project.description,
-    skills: project.skills || [],
-    domain: project.domain,
-    duration: project.duration,
-    slots: project.slots,
-    remaining: Math.max(0, project.slots - applicationCount),
-    deadline: new Date(project.deadline).toLocaleDateString(),
-    rolesNeeded: project.skills?.join(", ") || "Team members",
-    teamSlots: `${applicationCount}/${project.slots} applications`,
-  };
+function formatPostType(type: FeedProject["postType"]) {
+  return type
+    .toLowerCase()
+    .split("_")
+    .map((part) => part.charAt(0).toUpperCase() + part.slice(1))
+    .join(" ");
 }
