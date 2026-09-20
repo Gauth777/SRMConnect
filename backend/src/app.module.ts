@@ -12,6 +12,7 @@ import { UsersModule } from './users/users.module';
 import { ProfilesModule } from './profiles/profiles.module';
 import { ProjectsModule } from './projects/projects.module';
 import { ApplicationsModule } from './applications/applications.module';
+import { SavedProjectsModule } from './saved-projects/saved-projects.module';
 
 @Module({
   imports: [
@@ -34,6 +35,7 @@ import { ApplicationsModule } from './applications/applications.module';
     ProfilesModule,
     ProjectsModule,
     ApplicationsModule,
+    SavedProjectsModule,
   ],
   providers: [
     {
