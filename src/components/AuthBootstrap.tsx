@@ -11,7 +11,32 @@ export function AuthBootstrap() {
     if (!hasSupabaseBrowserConfig()) return;
 
     const supabase = getSupabaseBrowserClient();
-    void supabase.auth.getSession();
+    let active = true;
+
+    const validateCurrentUser = async () => {
+      const {
+        data: { session },
+      } = await supabase.auth.getSession();
+
+      if (!session) {
+        localStorage.removeItem("campusconnect_user");
+        return;
+      }
+
+      const {
+        data: { user },
+        error,
+      } = await supabase.auth.getUser();
+
+      if (!active) return;
+
+      if (error || !user) {
+        localStorage.removeItem("campusconnect_user");
+        await supabase.auth.signOut({ scope: "local" });
+      }
+    };
+
+    void validateCurrentUser();
 
     const {
       data: { subscription },
@@ -21,7 +46,10 @@ export function AuthBootstrap() {
       }
     });
 
-    return () => subscription.unsubscribe();
+    return () => {
+      active = false;
+      subscription.unsubscribe();
+    };
   }, []);
 
   return null;
