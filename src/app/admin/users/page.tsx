@@ -38,7 +38,7 @@ export default function AdminUsersPage() {
         <div className="overflow-x-auto rounded-2xl border border-[#C7CAB6] bg-white">
           <table className="w-full min-w-[760px] text-left text-sm">
             <thead className="bg-[#EEF0E9] text-[#4A5E58]">
-              <tr>{tab==="students" ? ["Name","Email","Registration No.","Department","Year","Applications","Status"] : ["Name","Email","Employee ID","Department","Designation","Advisor Role","Projects","Verification"].map((x)=><th key={x} className="px-4 py-3">{x}</th>)}</tr>
+              <tr>{(tab==="students" ? ["Name","Email","Registration No.","Department","Year","Applications","Status"] : ["Name","Email","Employee ID","Department","Designation","Advisor Role","Projects","Verification"]).map((x)=><th key={x} className="px-4 py-3">{x}</th>)}</tr>
             </thead>
             <tbody>
               {rows.map((row:any)=><tr key={row.id} className="border-t border-[#E6E5DC]">
