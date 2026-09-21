@@ -1,275 +1,48 @@
 "use client";
 
-import React, { useState, useEffect } from "react";
-import { useRouter } from "next/navigation";
-import { motion } from "framer-motion";
+import { useMemo } from "react";
 import AdminShell from "@/components/admin/AdminShell";
 import LoadingScreen from "@/components/admin/LoadingScreen";
-import { AdminToastProvider, useAdminToast } from "@/components/admin/AdminToast";
-import { Users, GraduationCap, FileText, AlertTriangle, ShieldCheck, TrendingUp } from "lucide-react";
-
-interface AdminData {
-  name: string;
-  email: string;
-}
-
-function AnalyticsContent() {
-  const stats = [
-    { icon: Users, label: "Total Students", value: "1,247", color: "#63807B" },
-    { icon: GraduationCap, label: "Total Faculty", value: "89", color: "#7D9185" },
-    { icon: FileText, label: "Active Posts", value: "34", color: "#8B956B" },
-    { icon: AlertTriangle, label: "Pending Reports", value: "3", color: "#E2C383" },
-    { icon: ShieldCheck, label: "FA Tagged Faculty", value: "12", color: "#63807B" },
-    { icon: TrendingUp, label: "This Week New Joins", value: "28", color: "#8B956B" },
-  ];
-
-  const newUsersData = [
-    { day: "Mon", value: 8 },
-    { day: "Tue", value: 12 },
-    { day: "Wed", value: 5 },
-    { day: "Thu", value: 18 },
-    { day: "Fri", value: 9 },
-    { day: "Sat", value: 3 },
-    { day: "Sun", value: 7 },
-  ];
-  const maxNewUsers = Math.max(...newUsersData.map((d) => d.value));
-
-  const postsByType = [
-    { label: "Project", value: 18 },
-    { label: "Hackathon", value: 9 },
-    { label: "Research", value: 6 },
-    { label: "Inhouse", value: 3 },
-  ];
-  const maxPosts = Math.max(...postsByType.map((d) => d.value));
-
-  const deptData = [
-    { label: "CSE", value: 420 },
-    { label: "ECE", value: 280 },
-    { label: "MECH", value: 210 },
-    { label: "IT", value: 160 },
-    { label: "Others", value: 177 },
-  ];
-  const maxDept = Math.max(...deptData.map((d) => d.value));
-
-  const barStyle = (value: number, max: number, color: string) => ({
-    height: `${Math.max((value / max) * 100, 4)}%`,
-    background: color,
-    borderRadius: "4px 4px 0 0",
-    minHeight: 4,
-  });
-
-  const hBarStyle = (value: number, max: number) => ({
-    width: `${Math.max((value / max) * 100, 4)}%`,
-    height: "20px",
-    background: "linear-gradient(90deg, #63807B, #8B956B)",
-    borderRadius: "4px",
-    minWidth: 4,
-  });
-
-  return (
-    <div>
-      <h2
-        style={{
-          fontFamily: "Playfair Display, Georgia, serif",
-          fontSize: "24px",
-          fontWeight: 700,
-          color: "#2C3830",
-          marginBottom: "20px",
-        }}
-      >
-        Platform Analytics
-      </h2>
-
-      {/* Stats Overview */}
-      <div className="admin-stats-grid" style={{ marginBottom: "28px" }}>
-        {stats.map((s, i) => {
-          const Icon = s.icon;
-          return (
-            <motion.div
-              key={s.label}
-              initial={{ opacity: 0, y: 20 }}
-              animate={{ opacity: 1, y: 0 }}
-              transition={{ duration: 0.3, delay: i * 0.05 }}
-              style={{
-                background: "rgba(255,255,255,0.9)",
-                border: "1px solid #C7CAB6",
-                borderRadius: "16px",
-                padding: "20px",
-                transition: "box-shadow 0.2s",
-              }}
-              onMouseEnter={(e) => {
-                e.currentTarget.style.boxShadow = "0 4px 20px rgba(99,128,123,0.12)";
-              }}
-              onMouseLeave={(e) => {
-                e.currentTarget.style.boxShadow = "none";
-              }}
-            >
-              <div style={{ display: "flex", alignItems: "center", gap: "8px", marginBottom: "8px" }}>
-                <Icon style={{ width: 16, height: 16, color: s.color }} />
-                <span style={{ fontSize: "12px", color: "#4A5E58", fontFamily: "Inter, sans-serif" }}>{s.label}</span>
-              </div>
-              <div
-                style={{
-                  fontFamily: "Playfair Display, Georgia, serif",
-                  fontSize: "36px",
-                  fontWeight: 800,
-                  color: s.color,
-                }}
-              >
-                {s.value}
-              </div>
-            </motion.div>
-          );
-        })}
-      </div>
-
-      {/* Charts Section */}
-      <div style={{ display: "flex", flexDirection: "column", gap: "24px" }}>
-        {/* Chart 1 — New Users This Week */}
-        <motion.div
-          initial={{ opacity: 0, y: 15 }}
-          animate={{ opacity: 1, y: 0 }}
-          transition={{ duration: 0.3, delay: 0.3 }}
-          style={{
-            background: "rgba(255,255,255,0.9)",
-            border: "1px solid #C7CAB6",
-            borderRadius: "16px",
-            padding: "24px",
-          }}
-        >
-          <h3
-            style={{
-              fontFamily: "Playfair Display, Georgia, serif",
-              fontSize: "16px",
-              fontWeight: 700,
-              color: "#2C3830",
-              marginBottom: "20px",
-            }}
-          >
-            New Users This Week
-          </h3>
-          <div style={{ display: "flex", alignItems: "flex-end", gap: "12px", height: 160, paddingBottom: 24, borderBottom: "1px solid #C7CAB6" }}>
-            {newUsersData.map((d) => (
-              <div key={d.day} style={{ flex: 1, display: "flex", flexDirection: "column", alignItems: "center", gap: "8px", height: "100%", justifyContent: "flex-end" }}>
-                <span style={{ fontSize: "11px", fontWeight: 700, color: "#63807B" }}>{d.value}</span>
-                <div style={{ width: "100%", ...barStyle(d.value, maxNewUsers, "#63807B") }} />
-              </div>
-            ))}
-          </div>
-          <div style={{ display: "flex", gap: "12px", marginTop: 8 }}>
-            {newUsersData.map((d) => (
-              <div key={d.day} style={{ flex: 1, textAlign: "center", fontSize: "11px", color: "#7D9185", fontWeight: 600 }}>
-                {d.day}
-              </div>
-            ))}
-          </div>
-        </motion.div>
-
-        {/* Chart 2 — Posts by Type */}
-        <motion.div
-          initial={{ opacity: 0, y: 15 }}
-          animate={{ opacity: 1, y: 0 }}
-          transition={{ duration: 0.3, delay: 0.4 }}
-          style={{
-            background: "rgba(255,255,255,0.9)",
-            border: "1px solid #C7CAB6",
-            borderRadius: "16px",
-            padding: "24px",
-          }}
-        >
-          <h3
-            style={{
-              fontFamily: "Playfair Display, Georgia, serif",
-              fontSize: "16px",
-              fontWeight: 700,
-              color: "#2C3830",
-              marginBottom: "20px",
-            }}
-          >
-            Posts by Type
-          </h3>
-          <div style={{ display: "flex", flexDirection: "column", gap: "14px" }}>
-            {postsByType.map((d) => (
-              <div key={d.label} style={{ display: "flex", alignItems: "center", gap: "12px" }}>
-                <span style={{ fontSize: "12px", color: "#4A5E58", fontWeight: 600, width: 90, textAlign: "right", flexShrink: 0 }}>
-                  {d.label}
-                </span>
-                <div style={{ flex: 1, display: "flex", alignItems: "center", gap: "10px" }}>
-                  <div style={hBarStyle(d.value, maxPosts)} />
-                  <span style={{ fontSize: "12px", fontWeight: 700, color: "#2C3830", minWidth: 24 }}>{d.value}</span>
-                </div>
-              </div>
-            ))}
-          </div>
-        </motion.div>
-
-        {/* Chart 3 — Top Departments */}
-        <motion.div
-          initial={{ opacity: 0, y: 15 }}
-          animate={{ opacity: 1, y: 0 }}
-          transition={{ duration: 0.3, delay: 0.5 }}
-          style={{
-            background: "rgba(255,255,255,0.9)",
-            border: "1px solid #C7CAB6",
-            borderRadius: "16px",
-            padding: "24px",
-          }}
-        >
-          <h3
-            style={{
-              fontFamily: "Playfair Display, Georgia, serif",
-              fontSize: "16px",
-              fontWeight: 700,
-              color: "#2C3830",
-              marginBottom: "20px",
-            }}
-          >
-            Top Departments by Student Count
-          </h3>
-          <div style={{ display: "flex", flexDirection: "column", gap: "14px" }}>
-            {deptData.map((d) => (
-              <div key={d.label} style={{ display: "flex", alignItems: "center", gap: "12px" }}>
-                <span style={{ fontSize: "12px", color: "#4A5E58", fontWeight: 600, width: 60, textAlign: "right", flexShrink: 0 }}>
-                  {d.label}
-                </span>
-                <div style={{ flex: 1, display: "flex", alignItems: "center", gap: "10px" }}>
-                  <div style={hBarStyle(d.value, maxDept)} />
-                  <span style={{ fontSize: "12px", fontWeight: 700, color: "#2C3830", minWidth: 36 }}>{d.value}</span>
-                </div>
-              </div>
-            ))}
-          </div>
-        </motion.div>
-      </div>
-    </div>
-  );
-}
+import { useAdminLive } from "@/lib/admin-live";
 
 export default function AdminAnalyticsPage() {
-  const router = useRouter();
-  const [mounted, setMounted] = useState(false);
-  const [isLoading, setIsLoading] = useState(true);
-  const [adminData, setAdminData] = useState<AdminData | null>(null);
+  const { mounted, admin, data, loading, error } = useAdminLive();
+  const departments = useMemo(()=>{
+    const map = new Map<string,number>();
+    data?.students.forEach((s)=>map.set(s.department || "Unspecified",(map.get(s.department || "Unspecified")||0)+1));
+    data?.faculty.forEach((f)=>map.set(f.department || "Unspecified",(map.get(f.department || "Unspecified")||0)+1));
+    return [...map.entries()].sort((a,b)=>b[1]-a[1]);
+  },[data]);
 
-  useEffect(() => {
-    setMounted(true);
-    const data = localStorage.getItem("campusconnect_user");
-    if (!data) { router.push("/login/admin"); return; }
-    const parsed = JSON.parse(data);
-    if (parsed.role !== "admin") { router.push("/login/admin"); return; }
-    if (!parsed.loggedIn) { router.push("/login/admin"); return; }
-    setAdminData({ name: parsed.name || "Admin", email: parsed.email || "" });
-    setIsLoading(false);
-  }, [router]);
-
-  if (!mounted) return null;
-  if (isLoading || !adminData) return <LoadingScreen />;
-
-  return (
-    <AdminToastProvider>
-      <AdminShell adminName={adminData.name} adminEmail={adminData.email}>
-        <AnalyticsContent />
-      </AdminShell>
-    </AdminToastProvider>
-  );
+  if (!mounted || loading || !admin) return <LoadingScreen />;
+  return <AdminShell adminName={admin.name} adminEmail={admin.email}>
+    <div className="space-y-6">
+      <div><h1 className="font-['Playfair_Display'] text-3xl font-bold text-[#2C3830]">Analytics</h1><p className="text-sm text-[#7D9185]">Derived from current Supabase records.</p></div>
+      {error || !data ? <ErrorCard message={error || "Live analytics unavailable."}/> : <>
+        <div className="grid gap-4 md:grid-cols-3">
+          <Stat label="Profiles" value={data.summary.totalProfiles}/><Stat label="Projects" value={data.summary.totalProjects}/><Stat label="Applications" value={data.summary.totalApplications}/>
+          <Stat label="Students" value={data.summary.totalStudents}/><Stat label="Faculty" value={data.summary.totalFaculty}/><Stat label="Completed Profiles" value={data.summary.completedProfiles}/>
+        </div>
+        <div className="grid gap-5 lg:grid-cols-2">
+          <Panel title="Project Status">
+            {["OPEN","DRAFT","CLOSED","ARCHIVED"].map((status)=><Bar key={status} label={status} value={data.projects.filter((p)=>p.status===status).length} total={Math.max(1,data.projects.length)}/>)}
+          </Panel>
+          <Panel title="Application Status">
+            {["PENDING","ACCEPTED","REJECTED","WITHDRAWN"].map((status)=><Bar key={status} label={status} value={data.applications.filter((a)=>a.status===status).length} total={Math.max(1,data.applications.length)}/>)}
+          </Panel>
+          <Panel title="Department Distribution">
+            {departments.length ? departments.map(([name,count])=><Bar key={name} label={name} value={count} total={Math.max(1,data.summary.totalStudents+data.summary.totalFaculty)}/>) : <p className="text-sm text-[#7D9185]">No department data yet.</p>}
+          </Panel>
+          <Panel title="Recent Growth">
+            <div className="space-y-2 text-sm"><Row label="New joins, last 7 days" value={data.summary.newJoinsThisWeek}/><Row label="Posts, last 7 days" value={data.summary.postsThisWeek}/><Row label="Applications today" value={data.summary.applicationsToday}/></div>
+          </Panel>
+        </div>
+      </>}
+    </div>
+  </AdminShell>;
 }
+function Stat({label,value}:{label:string;value:number}){return <div className="rounded-2xl border border-[#C7CAB6] bg-white p-5"><div className="text-xs text-[#7D9185]">{label}</div><div className="mt-1 text-3xl font-extrabold text-[#63807B]">{value}</div></div>}
+function Panel({title,children}:{title:string;children:React.ReactNode}){return <div className="rounded-2xl border border-[#C7CAB6] bg-white p-5"><h2 className="mb-4 font-['Playfair_Display'] text-xl font-bold text-[#2C3830]">{title}</h2>{children}</div>}
+function Bar({label,value,total}:{label:string;value:number;total:number}){return <div className="mb-3"><div className="mb-1 flex justify-between text-xs"><span>{label}</span><b>{value}</b></div><div className="h-2 rounded-full bg-[#EEF0E9]"><div className="h-2 rounded-full bg-[#63807B]" style={{width:`${Math.min(100,(value/total)*100)}%`}}/></div></div>}
+function Row({label,value}:{label:string;value:number}){return <div className="flex justify-between"><span className="text-[#4A5E58]">{label}</span><b>{value}</b></div>}
+function ErrorCard({message}:{message:string}) { return <div className="rounded-xl border border-red-200 bg-red-50 p-4 text-sm text-red-700">{message}</div>; }
