@@ -1,11 +1,23 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
+import { ApiError, apiRequest } from "@/lib/api";
+
+interface FacultyProject {
+  id: string;
+  postType: string;
+  title: string;
+  deadline: string;
+  status: string;
+  _count?: { applications?: number };
+}
 
 export default function FacultyDashboardPage() {
   const router = useRouter();
   const [mounted, setMounted] = useState(false);
+  const [projects, setProjects] = useState<FacultyProject[]>([]);
+  const [loadingProjects, setLoadingProjects] = useState(true);
   const [facultyData, setFacultyData] = useState<{
     name: string;
     designation: string;
@@ -14,29 +26,78 @@ export default function FacultyDashboardPage() {
   } | null>(null);
 
   useEffect(() => {
-    setMounted(true);
-    const data = localStorage.getItem("campusconnect_user");
-    if (!data) { router.push("/login/faculty"); return; }
-    const parsed = JSON.parse(data);
-    if (parsed.role !== "faculty") { router.push("/login/faculty"); return; }
-    if (!parsed.loggedIn) { router.push("/login/faculty"); return; }
-    if (parsed.profileComplete === false) { router.push("/faculty/setup"); return; }
-    setFacultyData({
-      name: parsed.name || "Faculty",
-      designation: parsed.designation || "Professor",
-      department: parsed.department || "CSE",
-      campus: parsed.campus || "KTR"
-    });
+    let cancelled = false;
+
+    const load = async () => {
+      setMounted(true);
+      const data = localStorage.getItem("campusconnect_user");
+      if (!data) { router.replace("/login/faculty"); return; }
+
+      let parsed: any;
+      try { parsed = JSON.parse(data); }
+      catch {
+        localStorage.removeItem("campusconnect_user");
+        router.replace("/login/faculty");
+        return;
+      }
+
+      if (parsed.role !== "faculty" || !parsed.loggedIn) {
+        router.replace("/login/faculty");
+        return;
+      }
+      if (parsed.profileComplete === false) {
+        router.replace("/faculty/setup");
+        return;
+      }
+
+      setFacultyData({
+        name: parsed.name || "Faculty",
+        designation: parsed.designation || "Professor",
+        department: parsed.department || "CSE",
+        campus: parsed.campus || "KTR",
+      });
+
+      try {
+        const rows = await apiRequest<FacultyProject[]>("/projects/mine");
+        if (!cancelled) setProjects(rows);
+      } catch (error) {
+        if (error instanceof ApiError && error.status === 401) {
+          localStorage.removeItem("campusconnect_user");
+          router.replace("/login/faculty");
+          return;
+        }
+        console.error("Could not load faculty projects", error);
+      } finally {
+        if (!cancelled) setLoadingProjects(false);
+      }
+    };
+
+    void load();
+    return () => { cancelled = true; };
   }, [router]);
 
-  // Critical — return null until mounted to prevent hydration mismatch
-  if (!mounted) return null;
-  if (!facultyData) return null;
+  const stats = useMemo(() => {
+    const totalApplicants = projects.reduce(
+      (sum, project) => sum + (project._count?.applications || 0),
+      0,
+    );
+    const active = projects.filter((project) => project.status === "OPEN").length;
+    const closed = projects.filter(
+      (project) => project.status === "CLOSED" || project.status === "ARCHIVED",
+    ).length;
+
+    return [
+      { label: "Total Posts", value: String(projects.length), color: "#7B6B8A" },
+      { label: "Total Applicants", value: String(totalApplicants), color: "#9B7BB0" },
+      { label: "Active Posts", value: String(active), color: "#677661" },
+      { label: "Closed Posts", value: String(closed), color: "#E06C6B" },
+    ];
+  }, [projects]);
+
+  if (!mounted || !facultyData) return null;
 
   return (
     <div style={{ minHeight: "100vh", background: "#F0EBF5", fontFamily: "Inter, sans-serif" }}>
-
-      {/* NAVBAR */}
       <header style={{
         position: "fixed", top: 0, left: 0, right: 0, height: "56px",
         background: "#EDE8F0", borderBottom: "1px solid rgba(168,152,184,0.3)",
@@ -48,7 +109,7 @@ export default function FacultyDashboardPage() {
         </span>
         <div style={{ display: "flex", alignItems: "center", gap: "12px" }}>
           <button
-            onClick={() => { localStorage.clear(); router.push("/"); }}
+            onClick={() => { localStorage.removeItem("campusconnect_user"); router.push("/"); }}
             style={{ padding: "6px 14px", borderRadius: "8px", border: "1px solid rgba(168,152,184,0.4)", background: "transparent", color: "#A898B8", fontSize: "12px", cursor: "pointer" }}
           >
             Logout
@@ -59,10 +120,7 @@ export default function FacultyDashboardPage() {
         </div>
       </header>
 
-      {/* BODY */}
       <div style={{ display: "flex", paddingTop: "56px", minHeight: "100vh" }}>
-
-        {/* LEFT SIDEBAR */}
         <aside style={{
           width: "220px", background: "#EDE8F0",
           borderRight: "1px solid rgba(168,152,184,0.25)",
@@ -71,7 +129,6 @@ export default function FacultyDashboardPage() {
           display: "flex", flexDirection: "column", gap: "4px",
           overflowY: "auto"
         }}>
-          {/* Mini profile */}
           <div style={{ background: "rgba(255,255,255,0.7)", borderRadius: "12px", padding: "12px", marginBottom: "12px", border: "1px solid rgba(168,152,184,0.3)" }}>
             <div style={{ width: "40px", height: "40px", borderRadius: "50%", background: "#7B6B8A", color: "white", display: "flex", alignItems: "center", justifyContent: "center", fontSize: "16px", fontWeight: 700, marginBottom: "8px" }}>
               {facultyData.name.charAt(0)}
@@ -80,7 +137,6 @@ export default function FacultyDashboardPage() {
             <div style={{ fontSize: "10px", color: "#7B6B8A" }}>{facultyData.designation} · {facultyData.department}</div>
           </div>
 
-          {/* Nav */}
           {[
             { label: "📊 Dashboard", path: "/faculty/dashboard", active: true },
             { label: "➕ Create Post", path: "/faculty/create-post", active: false },
@@ -102,17 +158,9 @@ export default function FacultyDashboardPage() {
           ))}
         </aside>
 
-        {/* MAIN */}
         <main style={{ marginLeft: "220px", flex: 1, padding: "24px" }}>
-
-          {/* Stats */}
           <div style={{ display: "grid", gridTemplateColumns: "repeat(4,1fr)", gap: "16px", marginBottom: "24px" }}>
-            {[
-              { label: "Total Posts", value: "3", color: "#7B6B8A" },
-              { label: "Total Applicants", value: "12", color: "#9B7BB0" },
-              { label: "Accepted", value: "4", color: "#677661" },
-              { label: "Pending", value: "8", color: "#E06C6B" },
-            ].map((s) => (
+            {stats.map((s) => (
               <div key={s.label} style={{ background: "rgba(255,255,255,0.85)", borderRadius: "16px", padding: "20px", border: "1px solid rgba(168,152,184,0.3)" }}>
                 <div style={{ fontFamily: "Playfair Display, Georgia, serif", fontSize: "32px", fontWeight: 800, color: s.color }}>{s.value}</div>
                 <div style={{ fontSize: "12px", color: "#7B6B8A", marginTop: "4px" }}>{s.label}</div>
@@ -120,38 +168,47 @@ export default function FacultyDashboardPage() {
             ))}
           </div>
 
-          {/* CTA */}
           <button onClick={() => router.push("/faculty/create-post")}
             style={{ width: "100%", padding: "16px", borderRadius: "14px", border: "none", background: "#7B6B8A", color: "white", fontSize: "15px", fontWeight: 700, cursor: "pointer", marginBottom: "24px" }}>
             + Post a New Project or Opportunity
           </button>
 
-          {/* Recent Posts */}
           <div style={{ fontFamily: "Playfair Display, Georgia, serif", fontSize: "22px", fontWeight: 700, color: "#3D2A4A", marginBottom: "16px" }}>
             Your Recent Posts
           </div>
 
-          <div style={{ display: "flex", flexDirection: "column", gap: "12px" }}>
-            {[
-              { type: "PROJECT", title: "AI-based Traffic Optimization", applicants: 5, deadline: "July 15", status: "Open" },
-              { type: "RESEARCH", title: "Federated Learning for Healthcare", applicants: 4, deadline: "July 20", status: "Open" },
-              { type: "HACKATHON", title: "Smart India Hackathon Team", applicants: 3, deadline: "June 30", status: "Closed" },
-            ].map((post, i) => (
-              <div key={i} style={{ background: "rgba(255,255,255,0.9)", borderRadius: "14px", padding: "16px", border: "1px solid #D4C8E0", display: "flex", alignItems: "center", justifyContent: "space-between", gap: "16px" }}>
-                <div>
-                  <span style={{ display: "inline-block", background: "#7B6B8A", color: "white", fontSize: "10px", fontWeight: 700, padding: "2px 8px", borderRadius: "4px", marginBottom: "6px" }}>{post.type}</span>
-                  <div style={{ fontSize: "14px", fontWeight: 700, color: "#3D2A4A" }}>{post.title}</div>
-                  <div style={{ fontSize: "11px", color: "#7B6B8A", marginTop: "4px" }}>{post.applicants} applicants · Deadline: {post.deadline}</div>
+          {loadingProjects ? (
+            <div style={{ color: "#7B6B8A", fontSize: "14px" }}>Loading posts…</div>
+          ) : projects.length === 0 ? (
+            <div style={{ background: "rgba(255,255,255,0.9)", borderRadius: "14px", padding: "20px", border: "1px solid #D4C8E0", color: "#7B6B8A", fontSize: "14px" }}>
+              No posts yet. Create your first project or opportunity.
+            </div>
+          ) : (
+            <div style={{ display: "flex", flexDirection: "column", gap: "12px" }}>
+              {projects.slice(0, 3).map((post) => (
+                <div key={post.id} style={{ background: "rgba(255,255,255,0.9)", borderRadius: "14px", padding: "16px", border: "1px solid #D4C8E0", display: "flex", alignItems: "center", justifyContent: "space-between", gap: "16px" }}>
+                  <div>
+                    <span style={{ display: "inline-block", background: "#7B6B8A", color: "white", fontSize: "10px", fontWeight: 700, padding: "2px 8px", borderRadius: "4px", marginBottom: "6px" }}>{post.postType}</span>
+                    <div style={{ fontSize: "14px", fontWeight: 700, color: "#3D2A4A" }}>{post.title}</div>
+                    <div style={{ fontSize: "11px", color: "#7B6B8A", marginTop: "4px" }}>
+                      {post._count?.applications || 0} applicants · Deadline: {new Date(post.deadline).toLocaleDateString()}
+                    </div>
+                  </div>
+                  <div style={{ display: "flex", alignItems: "center", gap: "8px", flexShrink: 0 }}>
+                    <span style={{ fontSize: "11px", fontWeight: 700, color: post.status === "OPEN" ? "#677661" : "#E06C6B", background: post.status === "OPEN" ? "rgba(103,118,97,0.1)" : "rgba(224,108,107,0.1)", padding: "3px 8px", borderRadius: "20px" }}>
+                      {post.status}
+                    </span>
+                    <button
+                      onClick={() => router.push("/faculty/posts")}
+                      style={{ padding: "6px 12px", borderRadius: "8px", border: "1px solid #A898B8", background: "transparent", color: "#7B6B8A", fontSize: "11px", fontWeight: 600, cursor: "pointer" }}
+                    >
+                      Manage
+                    </button>
+                  </div>
                 </div>
-                <div style={{ display: "flex", alignItems: "center", gap: "8px", flexShrink: 0 }}>
-                  <span style={{ fontSize: "11px", fontWeight: 700, color: post.status === "Open" ? "#677661" : "#E06C6B", background: post.status === "Open" ? "rgba(103,118,97,0.1)" : "rgba(224,108,107,0.1)", padding: "3px 8px", borderRadius: "20px" }}>{post.status}</span>
-                  <button style={{ padding: "6px 12px", borderRadius: "8px", border: "1px solid #A898B8", background: "transparent", color: "#7B6B8A", fontSize: "11px", fontWeight: 600, cursor: "pointer" }}>
-                    View Applicants
-                  </button>
-                </div>
-              </div>
-            ))}
-          </div>
+              ))}
+            </div>
+          )}
         </main>
       </div>
     </div>
