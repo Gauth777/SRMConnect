@@ -53,9 +53,13 @@ export default function AdminShell({ children, adminName, adminEmail }: AdminShe
     return () => document.removeEventListener("mousedown", handleClickOutside);
   }, []);
 
-  const handleLogout = () => {
+  const handleLogout = async () => {
     localStorage.removeItem("campusconnect_user");
-    router.push("/");
+    try {
+      await fetch("/api/admin/login", { method: "DELETE" });
+    } finally {
+      router.push("/");
+    }
   };
 
   const initials = adminName
