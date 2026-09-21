@@ -197,7 +197,7 @@ export function AuthLoginScreen({ role, onBack }: AuthLoginScreenProps) {
           email: form.email,
           password: form.password,
           options: {
-            emailRedirectTo: window.location.origin,
+            emailRedirectTo: `${window.location.origin}/auth/verified`,
             data: {
               requested_role: role,
             },
