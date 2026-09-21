@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { ADMIN_SESSION_COOKIE, createAdminSession } from "@/lib/admin-session";
 
 export async function POST(request: Request) {
   const expectedEmail = process.env.ADMIN_EMAIL?.trim().toLowerCase();
@@ -25,5 +26,25 @@ export async function POST(request: Request) {
     return NextResponse.json({ message: "Invalid admin email or password." }, { status: 401 });
   }
 
-  return NextResponse.json({ ok: true, email: expectedEmail });
+  const response = NextResponse.json({ ok: true, email: expectedEmail });
+  response.cookies.set(ADMIN_SESSION_COOKIE, createAdminSession(expectedEmail), {
+    httpOnly: true,
+    secure: process.env.NODE_ENV === "production",
+    sameSite: "lax",
+    path: "/",
+    maxAge: 60 * 60 * 8,
+  });
+  return response;
+}
+
+export async function DELETE() {
+  const response = NextResponse.json({ ok: true });
+  response.cookies.set(ADMIN_SESSION_COOKIE, "", {
+    httpOnly: true,
+    secure: process.env.NODE_ENV === "production",
+    sameSite: "lax",
+    path: "/",
+    maxAge: 0,
+  });
+  return response;
 }
